@@ -43,8 +43,14 @@ class WinUtils:
 
 	def list_drives(self):
 		'Use DiskDrive'
-		for drive in self.conn.Win32_DiskDrive():
-			yield drive
+		drives = self.conn.Win32_DiskDrive()
+		index = [ drive.index for drive in drives ]
+		index.sort()
+		for i in index:
+			print(i)
+			yield drives[i]
+		#for drive in self.conn.Win32_DiskDrive():
+		#	yield drive
 
 	def get_drive(self, diskindex):
 		for drive in self.conn.Win32_DiskDrive():
@@ -74,6 +80,7 @@ class Gui(CTk, WinUtils):
 
 	PAD = 10
 	BIGPAD = 20
+	TINYPAD = 2
 
 	def __init__(self, config):
 		'Base GUI'
@@ -88,16 +95,17 @@ class Gui(CTk, WinUtils):
 	def main(self):
 		self.main_frame = CTkFrame(self)
 		self.main_frame.pack()
-		drivetext = self.conf['TEXT']['drive']
+		wipedrivetext = self.conf['TEXT']['wipedrive']
+		self.drive_frame = CTkFrame(self.main_frame)
+		self.drive_frame.pack(padx=self.PAD, pady=self.PAD)
 		for drive in self.list_drives():
-			print(drive)
-			frame = CTkFrame(self.main_frame)
-			frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
-			CTkButton(frame, text=f'{drivetext} {drive.Index}', command=partial(self.prepdisk, drive.Index)).pack(
-				padx=self.PAD, pady=self.PAD, side='left')
+			frame = CTkFrame(self.drive_frame)
+			frame.pack(padx=self.PAD, pady=self.TINYPAD, fill='both', expand=True)
+			CTkButton(frame, text=f'{wipedrivetext} {drive.Index}', command=partial(self.prepdisk, drive.Index)).pack(
+				padx=self.PAD, pady=self.TINYPAD, side='left')
 			CTkLabel(frame, text=f'{drive.Caption}, {drive.MediaType} ({self.readable(drive.Size)})').pack(
-				padx=self.PAD, pady=self.PAD, anchor='w')
-		opt_frame = CTkFrame(self.main_frame)
+				padx=self.PAD, pady=self.TINYPAD, anchor='w')
+		opt_frame = CTkFrame(self.drive_frame)
 		opt_frame.pack(padx=self.PAD, pady=self.BIGPAD, fill='both', expand=True)
 		CTkButton(opt_frame, text=self.conf['TEXT']['refresh'], command=self.refresh).pack(
 			padx=self.PAD, pady=self.PAD, side='left')
