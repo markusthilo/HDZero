@@ -1,4 +1,4 @@
-/* zerod v0.1-20221220 */
+/* zerod v0.1-20221221 */
 /* written for Windows + MinGW */
 /* Author: Markus Thilo' */
 /* E-mail: markus.thilo@gmail.com */
@@ -61,7 +61,7 @@ void error_close(HANDLE fh) {
 }
 
 /* Print error to stderr and exit */
-void error_stopped(DWORD written, HANDLE fh) {
+void error_stopped(ULONGLONG written, HANDLE fh) {
 	fprintf(stderr, "Error: stopped after %llu bytes\n", written);
 	error_close(fh);
 }
