@@ -17,8 +17,10 @@ from customtkinter import set_appearance_mode
 from customtkinter import set_default_color_theme
 from customtkinter import CTkFrame, CTkButton, CTkLabel
 from customtkinter import CTkEntry, CTkRadioButton
-from tkinter import StringVar
+from customtkinter import CTkCheckBox
+from tkinter import StringVar, BooleanVar
 from tkinter.messagebox import askquestion
+from tkinter.filedialog import askopenfilenames
 
 class Config(ConfigParser):
 	'Handle config file hdprepare.conf'
@@ -43,14 +45,9 @@ class WinUtils:
 
 	def list_drives(self):
 		'Use DiskDrive'
-		drives = self.conn.Win32_DiskDrive()
-		index = [ drive.index for drive in drives ]
-		index.sort()
-		for i in index:
-			print(i)
+		drives = { drive.Index: drive for drive in self.conn.Win32_DiskDrive() }
+		for i in sorted(drives.keys()):
 			yield drives[i]
-		#for drive in self.conn.Win32_DiskDrive():
-		#	yield drive
 
 	def get_drive(self, diskindex):
 		for drive in self.conn.Win32_DiskDrive():
@@ -79,84 +76,23 @@ class Gui(CTk, WinUtils):
 	'GUI look and feel'
 
 	PAD = 10
-	BIGPAD = 20
-	TINYPAD = 2
+	SLIMPAD = 4
+	SIZEBASE = (
+		{ 'PiB': 2**50, 'TiB': 2**40, 'GiB': 2**30, 'MiB': 2**20, 'kiB': 2**10 },
+		{ 'PB': 10**15, 'TB': 10**12, 'GB': 10**9, 'MB': 10**6, 'kB': 10**3 }
+	)
 
 	def __init__(self, config):
-		'Base GUI'
+		'Base Configuration'
 		self.conf = config
 		set_appearance_mode(self.conf['APPEARANCE']['mode'])
 		set_default_color_theme(self.conf['APPEARANCE']['color_theme'])
 		CTk.__init__(self)
 		WinUtils.__init__(self)
+		self.settings = dict()
 		self.title(self.conf['TEXT']['title'])
-		self.main()
+		self.mainframe()
 
-	def main(self):
-		self.main_frame = CTkFrame(self)
-		self.main_frame.pack()
-		wipedrivetext = self.conf['TEXT']['wipedrive']
-		self.drive_frame = CTkFrame(self.main_frame)
-		self.drive_frame.pack(padx=self.PAD, pady=self.PAD)
-		for drive in self.list_drives():
-			frame = CTkFrame(self.drive_frame)
-			frame.pack(padx=self.PAD, pady=self.TINYPAD, fill='both', expand=True)
-			CTkButton(frame, text=f'{wipedrivetext} {drive.Index}', command=partial(self.prepdisk, drive.Index)).pack(
-				padx=self.PAD, pady=self.TINYPAD, side='left')
-			CTkLabel(frame, text=f'{drive.Caption}, {drive.MediaType} ({self.readable(drive.Size)})').pack(
-				padx=self.PAD, pady=self.TINYPAD, anchor='w')
-		opt_frame = CTkFrame(self.drive_frame)
-		opt_frame.pack(padx=self.PAD, pady=self.BIGPAD, fill='both', expand=True)
-		CTkButton(opt_frame, text=self.conf['TEXT']['refresh'], command=self.refresh).pack(
-			padx=self.PAD, pady=self.PAD, side='left')
-		self.fs = StringVar(value=self.conf['DEFAULT']['fs'])
-		CTkRadioButton(master=opt_frame, variable=self.fs, value='NTFS', text='NTFS').pack(
-			padx=self.PAD, pady=self.PAD, side='left')
-		CTkRadioButton(master=opt_frame, variable=self.fs, value='exFAT', text='exFAT').pack(
-			padx=self.PAD, pady=self.PAD, side='left')
-		volname = self.conf['TEXT']['volname']
-		CTkLabel(opt_frame, text=f'{volname}:').pack(
-			padx=self.PAD, pady=self.PAD, side='left')
-		self.volname = StringVar(value=self.conf['DEFAULT']['volname'])
-		CTkEntry(opt_frame, textvariable=self.volname).pack(
-			padx=self.PAD, pady=self.PAD, side='left')
-		CTkButton(self.main_frame, text=self.conf['TEXT']['quit'], command=self.destroy).pack(
-			padx=self.PAD, pady=self.PAD, side='right')
-
-	def prepdisk(self, diskindex):
-		'Prepare selected disk'
-		self.fs = self.fs.get()
-		self.volname = self.volname.get()
-		self.conf['DEFAULT']['fs'] = self.fs
-		self.conf['DEFAULT']['volname'] = self.volname
-		self.conf.write()
-		drive = self.get_drive(diskindex)
-		question = f'{drive.DeviceId}\n{drive.Caption}, {drive.MediaType}\n'
-		question += self.readable(drive.Size)
-		question += '\n\n'
-		question += self.conf['TEXT']['partitions']
-
-					#part.Dependent.DeviceID,
-					#part.Antecedent.DeviceID,
-					#part.Dependent.Description,
-					#part.Dependent.Size
-		
-		for part in self.list_partitions(diskindex):
-			question += f'\n\n{part.Dependent.DeviceID}\n{part.Antecedent.DeviceID}\n{part.Dependent.Description}\n'
-			question += self.readable(part.Dependent.Size)
-		question += '\n\n\n'
-		question += self.conf['TEXT']['areyoushure']
-		if askquestion(self.conf['TEXT']['title'], question) == 'yes':
-			print('Work to do')
-		else:
-			print('Abort')
-		self.refresh()
-		return
-
-	def refresh(self):
-		self.main_frame.destroy()
-		self.main()
-		
 	def readable(self, size):
 		'Genereate readable size string'
 		try:
@@ -164,22 +100,7 @@ class Gui(CTk, WinUtils):
 		except TypeError:
 			return self.conf['TEXT']['undetected']
 		outstr = f'{size} B'
-		for base in (
-				{
-					'PiB': 1125899906842620,
-					'TiB': 1099511627776,
-					'GiB': 1073741824,
-					'MiB': 1048576,
-					'kiB': 1024,
-				}, 
-				{
-					'PB': 1000000000000000,
-					'TB': 1000000000000,
-					'GB': 1000000000,
-					'MB': 1000000,
-					'kB': 1000,
-				}
-			):
+		for base in self.SIZEBASE:
 			for apx, b in base.items():
 				res = size/b
 				rnd = round(res, 2)
@@ -191,6 +112,127 @@ class Gui(CTk, WinUtils):
 					break
 		return outstr
 
+	def mainframe(self):
+		'Define Main Frame'
+		self.main_frame = CTkFrame(self)
+		self.main_frame.pack()
+		### WIPE DRIVE ###
+		self.drive_frame = CTkFrame(self.main_frame)
+		self.drive_frame.pack(padx=self.PAD, pady=self.PAD)
+		opt_frame = CTkFrame(self.drive_frame)
+		opt_frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
+		labeltext = self.conf['TEXT']['volname']
+		CTkLabel(opt_frame, text=f'{labeltext}:').pack(
+			padx=self.PAD, pady=self.PAD, side='left')
+		self.settings['volname'] = StringVar(value=self.conf['DEFAULT']['volname'])
+		CTkEntry(opt_frame, textvariable=self.settings['volname']).pack(
+			padx=self.PAD, pady=self.PAD, side='left')
+		self.settings['fs'] = StringVar(value=self.conf['DEFAULT']['fs'])
+		CTkRadioButton(master=opt_frame, variable=self.settings['fs'], value='NTFS', text='NTFS').pack(
+			padx=self.PAD, pady=self.PAD, side='left')
+		CTkRadioButton(master=opt_frame, variable=self.settings['fs'], value='exFAT', text='exFAT').pack(
+			padx=self.PAD, pady=self.PAD, side='left')
+		CTkRadioButton(master=opt_frame, variable=self.settings['fs'], value='FAT', text='FAT').pack(
+			padx=self.PAD, pady=self.PAD, side='left')
+		self.settings['writelog'] = BooleanVar(value=self.conf['DEFAULT']['writelog'])
+		CTkCheckBox(master=opt_frame, text=self.conf['TEXT']['writelog'], variable=self.settings['writelog'],
+			onvalue=True, offvalue=False).pack(padx=self.PAD, pady=self.PAD, side='left')
+		CTkButton(opt_frame, text=self.conf['TEXT']['refresh'], command=self.refresh).pack(
+			padx=self.PAD, pady=self.PAD, side='left')
+		labeltext = self.conf['TEXT']['wipedrive']
+		for drive in self.list_drives():
+			frame = CTkFrame(self.drive_frame)
+			frame.pack(padx=self.PAD, pady=(0, self.PAD), fill='both', expand=True)
+			CTkButton(frame, text=f'{labeltext} {drive.Index}', command=partial(self.wipe_disk, drive.Index)).pack(
+				padx=self.PAD, pady=self.SLIMPAD, side='left')
+			CTkLabel(frame, text=f'{drive.Caption}, {drive.MediaType} ({self.readable(drive.Size)})').pack(
+				padx=self.PAD, pady=self.SLIMPAD, anchor='w')
+		### WIPE FILE(S) ###
+		self.file_frame = CTkFrame(self.main_frame)
+		self.file_frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
+		frame = CTkFrame(self.file_frame)
+		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
+		CTkButton(frame, text=self.conf['TEXT']['wipefile'], command=self.wipe_file).pack(
+			padx=self.PAD, pady=self.PAD, side='left')
+		self.settings['deletefile'] = BooleanVar(value=self.conf['DEFAULT']['deletefile'])
+		CTkCheckBox(master=frame, text=self.conf['TEXT']['deletefile'], variable=self.settings['deletefile'],
+			onvalue=True, offvalue=False).pack(padx=self.PAD, pady=self.PAD, side='left')
+		### BOTTOM ###
+		frame = CTkFrame(self.main_frame)
+		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
+		frame = CTkFrame(frame)
+		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
+		self.settings['extra'] = BooleanVar(value=self.conf['DEFAULT']['extra'])
+		CTkCheckBox(master=frame, text=self.conf['TEXT']['extra'], variable=self.settings['extra'],
+			onvalue=True, offvalue=False).pack(padx=self.PAD, pady=self.PAD, side='left')
+		self.settings['askmore'] = BooleanVar(value=self.conf['DEFAULT']['askmore'])
+		CTkCheckBox(master=frame, text=self.conf['TEXT']['askmore'], variable=self.settings['askmore'],
+			onvalue=True, offvalue=False).pack(padx=self.PAD, pady=self.PAD, side='left')
+		CTkButton(frame, text=self.conf['TEXT']['quit'], command=self.quit_app).pack(
+			padx=self.PAD, pady=self.PAD, side='right')
+
+	def decode_settings(self):
+		'Decode settings and write as default to config file'
+		self.options = { setting: tkvalue.get() for setting, tkvalue in self.settings.items() } 
+		for option, value in self.options.items():
+			self.conf['DEFAULT'][option] = str(value)
+		self.conf.write()
+
+	def refresh(self):
+		self.decode_settings()
+		self.main_frame.destroy()
+		self.mainframe()
+
+	def quit_app(self):
+		'Write config an quit'
+		self.decode_settings()
+		self.destroy()
+
+	def confirm(self, question):
+		'Additional Confirmations'
+		question += '\n\n\n'
+		question += self.conf['TEXT']['areyoushure']
+		if not askquestion(self.conf['TEXT']['title'], question) == 'yes':
+			return False
+		if self.options['askmore'] and not (
+			askquestion(self.conf['TEXT']['title'], self.conf['TEXT']['areyoureallyshure']) == 'yes'
+			and askquestion(self.conf['TEXT']['title'], self.conf['TEXT']['areyoufngshure']) == 'yes'
+		):
+			return False
+		return True
+
+	def wipe_disk(self, diskindex):
+		'Wipe selected disk'
+		self.decode_settings()
+		drive = self.get_drive(diskindex)
+		question = self.conf['TEXT']['drivewarning']
+		question += f'\n\n{drive.DeviceId}\n{drive.Caption}, {drive.MediaType}\n'
+		question += self.readable(drive.Size) + '\n\n'
+		mounted = ''
+		for part in self.list_partitions(diskindex):
+			mounted += f'\n\n{part.Dependent.DeviceID}\n{part.Antecedent.DeviceID}\n{part.Dependent.Description}\n'
+			mounted += self.readable(part.Dependent.Size)
+		if mounted != '':
+			question += self.conf['TEXT']['mounted'] + mounted
+		else:
+			question += self.conf['TEXT']['nomounted']
+		if self.confirm(question):
+			print('Work to do')
+			######
+		self.refresh()
+
+	def wipe_file(self):
+		'Wipe selected file or files'
+		self.decode_settings()
+		files = askopenfilenames(title=self.conf['TEXT']['filestowipe'], initialdir=self.conf['DEFAULT']['initialdir'])
+		if len(files) > 0:
+			question = self.conf['TEXT']['filewarning']
+			for file in files:
+				question += f'\n{file}'
+			if self.confirm(question):
+				print('Work to do')
+				######
+		self.refresh()
 
 if __name__ == '__main__':  # start here
 	config = Config()
