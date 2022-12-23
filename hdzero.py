@@ -12,23 +12,28 @@ from pathlib import Path
 from configparser import ConfigParser
 from wmi import WMI
 from functools import partial
+from subprocess import Popen, PIPE
+from time import sleep
 from customtkinter import CTk
 from customtkinter import set_appearance_mode
 from customtkinter import set_default_color_theme
 from customtkinter import CTkFrame, CTkButton, CTkLabel
 from customtkinter import CTkEntry, CTkRadioButton
 from customtkinter import CTkCheckBox
-from tkinter import StringVar, BooleanVar
+from tkinter import StringVar, BooleanVar, PhotoImage
 from tkinter.messagebox import askquestion
 from tkinter.filedialog import askopenfilenames
 
 class Config(ConfigParser):
 	'Handle config file hdprepare.conf'
 
+	def __init__(self, path):
+		'Set path config file by giving app directory'
+		self.path = path
+		super().__init__()
+
 	def read(self):
 		'Open config file'
-		path = Path(__file__)
-		self.path = (path.parent / path.stem).with_suffix('.conf')
 		super().read(self.path)
 
 	def write(self):
@@ -72,9 +77,48 @@ class WinUtils:
 			if part.Antecedent.DiskIndex == diskindex:
 				yield part
 
-class Gui(CTk, WinUtils):
+class ZeroD:
+	'Use zerod.exe'
+
+	def __init__(self, path, dummy=False):
+		'Generate Object with the desired functions'
+		self.exe_path = path
+		self.dummy_write = dummy
+		self.extra_wipe = False
+
+	def launch_zproc(self, targetpath, targetsize=None, blocksize=None):
+		'Set file or drive to write to'
+		cmd = [self.exe_path, targetpath]
+		if targetsize:
+			cmd.append(str(targetsize))
+		if blocksize:
+			cmd.append(str(blocksize))
+		if self.extra_wipe:
+			cmd.append('/x')
+		if self.dummy_write:
+			cmd.append('/d')
+		self.zproc = Popen(cmd, stdout=PIPE, bufsize=1, universal_newlines=True)	#, stderr=PIPE)
+
+	def watch_zproc(self):
+		'Communicate with running zerod.exe'
+		for line in self.zproc.stdout:
+			print(line, end='')
+		#while self.zproc.poll() == None:
+			#stdout, stderr = self.zproc.communicate()
+			#print('running:', self.zproc.poll())
+			#print('stdout:', stdout)
+			sleep(0.5)
+		
+		
+		# self.dec(stdout), self.dec(stderr)
+		# log.write(proc.stdout.read())
+
+class Gui(CTk, WinUtils, ZeroD):
 	'GUI look and feel'
 
+	CONFIG = 'hdzero.conf'
+	ZEROD = 'zerod.exe'
+	APPICON = 'icon.png'
 	PAD = 10
 	SLIMPAD = 4
 	SIZEBASE = (
@@ -82,15 +126,19 @@ class Gui(CTk, WinUtils):
 		{ 'PB': 10**15, 'TB': 10**12, 'GB': 10**9, 'MB': 10**6, 'kB': 10**3 }
 	)
 
-	def __init__(self, config):
+	def __init__(self):
 		'Base Configuration'
-		self.conf = config
-		set_appearance_mode(self.conf['APPEARANCE']['mode'])
-		set_default_color_theme(self.conf['APPEARANCE']['color_theme'])
-		CTk.__init__(self)
+		parentpath = Path(__file__).parent
+		self.conf = Config(parentpath/self.CONFIG)
+		self.conf.read()
+		ZeroD.__init__(self, parentpath/self.ZEROD, dummy = self.conf['DEFAULT']['extra'])
 		WinUtils.__init__(self)
 		self.settings = dict()
+		CTk.__init__(self)
+		set_appearance_mode(self.conf['APPEARANCE']['mode'])
+		set_default_color_theme(self.conf['APPEARANCE']['color_theme'])
 		self.title(self.conf['TEXT']['title'])
+		self.iconphoto(False, PhotoImage(file=parentpath/self.APPICON))
 		self.mainframe()
 
 	def readable(self, size):
@@ -230,11 +278,14 @@ class Gui(CTk, WinUtils):
 			for file in files:
 				question += f'\n{file}'
 			if self.confirm(question):
-				print('Work to do')
+				self.extra_wipe = self.options['extra']
+				for file in files:
+					self.launch_zproc(Path(file))
+					self.watch_zproc()
+					
 				######
+		
 		self.refresh()
 
 if __name__ == '__main__':  # start here
-	config = Config()
-	config.read()
-	Gui(config).mainloop()
+	Gui().mainloop()
