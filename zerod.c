@@ -14,7 +14,7 @@ ULONGLONG read_ulonglong(char *s) {
 	int l = 0;
 	while (1) {
 		if (s[l] == 0) break;
-		if ( s[l] < '0' | s[l] > '9' ) return 0;
+		if ( s[l] < '0' || s[l] > '9' ) return 0;
 		l++;
 	}
 	ULONGLONG f = 1;
@@ -95,7 +95,7 @@ ULONGLONG write_blocks(
 	while ( blockswrtn++ < blockstw ) {	// write blocks
 		writectrl = WriteFile(fh, maxblock, blocksize, &newwritten, NULL);
 		written += newwritten;
-		if ( !writectrl | newwritten < blocksize ) error_stopped(written, fh);
+		if ( !writectrl || newwritten < blocksize ) error_stopped(written, fh);
 		if ( blockcnt++ == pinterval ) {
 			printf("... %llu%s", written, bytesof);
 			blockcnt = 1;
@@ -105,7 +105,7 @@ ULONGLONG write_blocks(
 	if ( towrite > 0 ) {	// write what's left
 		writectrl = WriteFile(fh, maxblock, towrite, &newwritten, NULL);
 		written += newwritten;
-		if ( !writectrl | newwritten < towrite ) error_stopped(written, fh);
+		if ( !writectrl || newwritten < towrite ) error_stopped(written, fh);
 		printf("... %llu%s", written, bytesof);
 	}
 	return written;
@@ -121,7 +121,7 @@ ULONGLONG dummy_write_blocks(
 	char *bytesof
 	)
 {
-	while ( written < towrite &  dummycnt-- > 1 ) {
+	while ( written < towrite && dummycnt-- > 1 ) {
 		written += blocksize;
 		if ( written > towrite ) break;
 		Sleep(dummysleep);
@@ -161,13 +161,13 @@ int main(int argc, char **argv) {
 	ULONGLONG argull[2];	// size arguments
 	int argullcnt = 0;
 	for (int i=2; i<argc; i++) {	// if there are more arguments
-		if ( ( argv[i][0] == '/' & argv[i][2] == 0 )	// x for two pass mode
-			& ( argv[i][1] == 'x' | argv[i][1] == 'X' ) 
+		if ( ( argv[i][0] == '/' && argv[i][2] == 0 )	// x for two pass mode
+			&& ( argv[i][1] == 'x' || argv[i][1] == 'X' ) 
 		) {
 			if ( xtrasave ) error_toomany(fh);
 			xtrasave = TRUE;
-		} else if ( ( argv[i][0] == '/' & argv[i][2] == 0 )
-			& ( argv[i][1] == 'd' | argv[i][1] == 'D' )	// d for dummy mode
+		} else if ( ( argv[i][0] == '/' && argv[i][2] == 0 )
+			&& ( argv[i][1] == 'd' || argv[i][1] == 'D' )	// d for dummy mode
 		) {
 			if ( dummy ) error_toomany(fh);
 			dummy = TRUE;
@@ -209,7 +209,7 @@ int main(int argc, char **argv) {
 		printf("Dummy mode, nothing will be written to disk\n");
 		if ( xtrasave ) printf("First pass: Writing random bytes\n");
 		else printf("Writing zeros\n");
-		if ( towrite > MINCALCSIZE & blocksize == 0 ) {
+		if ( towrite > MINCALCSIZE && blocksize == 0 ) {
 			printf("Calculating best block size\n");
 			blocksize = MAXBLOCKSIZE;
 			for (DWORD size=blocksize; size>=MINBLOCKSIZE; size=size>>1) {
@@ -242,7 +242,7 @@ int main(int argc, char **argv) {
 		clock_t bestduration = MAXCLOCK;
 		BOOL writectrl;
 		DWORD newwritten;
-		if ( towrite > MINCALCSIZE & blocksize == 0 ) {	// calculate best/fastes block size
+		if ( towrite > MINCALCSIZE && blocksize == 0 ) {	// calculate best/fastes block size
 			printf("Calculating best block size\n");
 			blocksize = maxblocksize;
 			DWORD size = maxblocksize;
@@ -253,7 +253,7 @@ int main(int argc, char **argv) {
 				for (DWORD blockcnt=0; blockcnt<blockstw; blockcnt++) {
 					writectrl = WriteFile(fh, maxblock, size, &newwritten, NULL);
 					written += newwritten;
-					if ( !writectrl | newwritten < size ) error_stopped(written, fh);
+					if ( !writectrl || newwritten < size ) error_stopped(written, fh);
 				}
 				duration = clock() - start;	// duration of writeprocess
 				printf("... %llu%s", written, bytesof);
