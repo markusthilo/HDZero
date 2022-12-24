@@ -1,4 +1,4 @@
-/* zerod v0.1-20221223 */
+/* zerod v0.1-20221224 */
 /* written for Windows + MinGW */
 /* Author: Markus Thilo' */
 /* E-mail: markus.thilo@gmail.com */
@@ -121,12 +121,13 @@ ULONGLONG dummy_write_blocks(
 	char *bytesof
 	)
 {
-	while ( written < towrite &  dummycnt-- > 0 ) {
+	while ( written < towrite &  dummycnt-- > 1 ) {
 		written += blocksize;
-		if ( written >= towrite ) written = towrite;
+		if ( written > towrite ) break;
 		Sleep(dummysleep);
 		printf("... %llu%s", written, bytesof);
 	}
+	printf("... %llu%s", towrite, bytesof);
 	return towrite;
 }
 

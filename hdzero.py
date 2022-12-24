@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 __author__ = 'Markus Thilo'
-__version__ = '0.1_2022-12-20'
+__version__ = '0.1_2022-12-24'
 __license__ = 'GPL-3'
 __email__ = 'markus.thilo@gmail.com'
 __status__ = 'Under Construction'
@@ -20,7 +20,9 @@ from customtkinter import set_default_color_theme
 from customtkinter import CTkFrame, CTkButton, CTkLabel
 from customtkinter import CTkEntry, CTkRadioButton
 from customtkinter import CTkCheckBox
+from customtkinter import CTkProgressBar
 from tkinter import StringVar, BooleanVar, PhotoImage
+from tkinter import CENTER
 from tkinter.messagebox import askquestion
 from tkinter.filedialog import askopenfilenames
 
@@ -97,21 +99,15 @@ class ZeroD:
 			cmd.append('/x')
 		if self.dummy_write:
 			cmd.append('/d')
-		self.zproc = Popen(cmd, stdout=PIPE, bufsize=1, universal_newlines=True)	#, stderr=PIPE)
+		self.zproc = Popen(cmd, stdout=PIPE, stderr=PIPE, text=True)
 
-	def watch_zproc(self):
+	def read_zproc(self):
 		'Communicate with running zerod.exe'
-		for line in self.zproc.stdout:
-			print(line, end='')
-		#while self.zproc.poll() == None:
-			#stdout, stderr = self.zproc.communicate()
-			#print('running:', self.zproc.poll())
-			#print('stdout:', stdout)
-			sleep(0.5)
-		
-		
-		# self.dec(stdout), self.dec(stderr)
-		# log.write(proc.stdout.read())
+		while True:
+			stdout = self.zproc.stdout.readline()
+			if not stdout and self.zproc.poll() != None:
+				break
+			yield stdout
 
 class Gui(CTk, WinUtils, ZeroD):
 	'GUI look and feel'
@@ -121,6 +117,9 @@ class Gui(CTk, WinUtils, ZeroD):
 	APPICON = 'icon.png'
 	PAD = 10
 	SLIMPAD = 4
+	BARWIDTH = 200
+	BARHEIGHT = 20
+	
 	SIZEBASE = (
 		{ 'PiB': 2**50, 'TiB': 2**40, 'GiB': 2**30, 'MiB': 2**20, 'kiB': 2**10 },
 		{ 'PB': 10**15, 'TB': 10**12, 'GB': 10**9, 'MB': 10**6, 'kB': 10**3 }
@@ -249,6 +248,27 @@ class Gui(CTk, WinUtils, ZeroD):
 			return False
 		return True
 
+	def workframe(self):
+		'Define Work Frame to show Progress'
+		self.work_frame = CTkFrame(self)
+		self.work_frame.pack()
+		frame = CTkFrame(self.work_frame)
+		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
+		self.head_info = StringVar()
+		CTkLabel(frame, textvariable=self.head_info).pack(padx=self.PAD, pady=self.PAD)
+		self.main_info = StringVar()
+		CTkLabel(frame, textvariable=self.main_info).pack(padx=self.PAD, pady=self.PAD)
+		self.progressbar = CTkProgressBar(
+			master = frame,
+			width = self.BARWIDTH,
+			height = self.BARHEIGHT,
+			border_width = self.SLIMPAD
+		)
+		self.progressbar.set(0)
+		self.progressbar.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
+		CTkButton(frame, text=self.conf['TEXT']['quit'], command=self.quit_app).pack(
+			padx=self.PAD, pady=self.PAD, side='right')
+
 	def wipe_disk(self, diskindex):
 		'Wipe selected disk'
 		self.decode_settings()
@@ -278,14 +298,19 @@ class Gui(CTk, WinUtils, ZeroD):
 			for file in files:
 				question += f'\n{file}'
 			if self.confirm(question):
+				self.main_frame.destroy()
+				self.workframe()
 				self.extra_wipe = self.options['extra']
 				for file in files:
 					self.launch_zproc(Path(file))
-					self.watch_zproc()
-					
-				######
+					for stdout in self.read_zproc():
+						self.main_info.set(stdout)
+						stdout_split = stdout.split()
+						if stdout_split[0] == '...':
+							self.progressbar.set(int(stdout_split[1])/int(stdout_split[3]))
+
 		
-		self.refresh()
+		#self.refresh()
 
 if __name__ == '__main__':  # start here
 	Gui().mainloop()
