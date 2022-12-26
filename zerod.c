@@ -1,4 +1,4 @@
-/* zerod v0.1-20221224 */
+/* zerod v0.1-20221226 */
 /* written for Windows + MinGW */
 /* Author: Markus Thilo' */
 /* E-mail: markus.thilo@gmail.com */
@@ -98,6 +98,7 @@ ULONGLONG write_blocks(
 		if ( !writectrl || newwritten < blocksize ) error_stopped(written, fh);
 		if ( blockcnt++ == pinterval ) {
 			printf("... %llu%s", written, bytesof);
+			fflush(stdout);
 			blockcnt = 1;
 		}
 	}
@@ -107,6 +108,7 @@ ULONGLONG write_blocks(
 		written += newwritten;
 		if ( !writectrl || newwritten < towrite ) error_stopped(written, fh);
 		printf("... %llu%s", written, bytesof);
+		fflush(stdout);
 	}
 	return written;
 }
@@ -126,8 +128,10 @@ ULONGLONG dummy_write_blocks(
 		if ( written > towrite ) break;
 		Sleep(dummysleep);
 		printf("... %llu%s", written, bytesof);
+		fflush(stdout);
 	}
 	printf("... %llu%s", towrite, bytesof);
+	fflush(stdout);
 	return towrite;
 }
 
@@ -209,21 +213,27 @@ int main(int argc, char **argv) {
 		printf("Dummy mode, nothing will be written to disk\n");
 		if ( xtrasave ) printf("First pass: Writing random bytes\n");
 		else printf("Writing zeros\n");
+		fflush(stdout);
 		if ( towrite > MINCALCSIZE && blocksize == 0 ) {
 			printf("Calculating best block size\n");
+			fflush(stdout);
 			blocksize = MAXBLOCKSIZE;
 			for (DWORD size=blocksize; size>=MINBLOCKSIZE; size=size>>1) {
 				printf("Testing block size %lu bytes\n", size);
+				fflush(stdout);
 				written += blocksize;
 				Sleep(DUMMYSLEEP);
 				printf("... %llu%s", written, bytesof);
+				fflush(stdout);
 			}
 			printf("Using block size %lu bytes\n", blocksize);
+			fflush(stdout);
 		}
 		blocksize = MAXBLOCKSIZE;
 		written = dummy_write_blocks(DUMMYCNT, DUMMYSLEEP, towrite, written, blocksize, bytesof);
 		if ( xtrasave ) {
 			printf("Second pass: Writing zeros\n");
+			fflush(stdout);
 			written = dummy_write_blocks(DUMMYCNT, DUMMYSLEEP, towrite, 0, blocksize, bytesof);
 		}
 	} else {	// the real thing starts here
@@ -233,17 +243,18 @@ int main(int argc, char **argv) {
 		char maxblock[maxblocksize];
 		if ( xtrasave ) {
 			for (int i=0; i<maxblocksize; i++) maxblock[i] = (char)rand();
-			printf("First pass: Writing random bytes\n");
 		} else {
 			memset(maxblock, 0, sizeof(maxblock));
 			printf("Writing zeros\n");
 		}
+		fflush(stdout);
 		/* Block size */
 		clock_t bestduration = MAXCLOCK;
 		BOOL writectrl;
 		DWORD newwritten;
 		if ( towrite > MINCALCSIZE && blocksize == 0 ) {	// calculate best/fastes block size
 			printf("Calculating best block size\n");
+			fflush(stdout);
 			blocksize = maxblocksize;
 			DWORD size = maxblocksize;
 			clock_t start, duration;
@@ -257,6 +268,7 @@ int main(int argc, char **argv) {
 				}
 				duration = clock() - start;	// duration of writeprocess
 				printf("... %llu%s", written, bytesof);
+				fflush(stdout);
 				if ( duration < bestduration ) {
 					bestduration = duration;
 					blocksize = size;
@@ -264,6 +276,7 @@ int main(int argc, char **argv) {
 				size = size >> 1;	// devide block by 2
 			}
 			printf("Using block size of %lu bytes\n", blocksize);
+			fflush(stdout);
 		} else if ( blocksize == 0 ) blocksize = maxblocksize;
 		/* First pass */
 		DWORD pinterval = MAXBLOCKSIZE / blocksize;	// Interval to print progress
@@ -271,6 +284,7 @@ int main(int argc, char **argv) {
 		/* Second passs */
 		if ( xtrasave ) {
 			printf("Second pass: Writing zeros\n");
+			fflush(stdout);
 			memset(maxblock, 0, sizeof(maxblock));	// fill array with zeros
 			close_handle(fh);	// close
 			fh = open_handle(argv[1]);	// and open again for second pass
@@ -278,6 +292,7 @@ int main(int argc, char **argv) {
 		}
 	}
 	printf("All done, %llu bytes were zeroed by writing blocks of %lu bytes\n", written, blocksize);
+	fflush(stdout);
 	close_handle(fh);
 	exit(0);
 }

@@ -12,7 +12,7 @@ from pathlib import Path
 from configparser import ConfigParser
 from wmi import WMI
 from functools import partial
-from subprocess import Popen
+from subprocess import Popen, PIPE, STDOUT
 from time import sleep
 from datetime import datetime
 from threading import Thread
@@ -86,7 +86,7 @@ class LogFile:
 	
 	def __init__(self, filepath):
 		'Open log file'
-		self.filehandler = open(filepath, 'w')
+		self.filehandler = open(filepath, 'w+')
 		self.write_timestamp()
 
 	def close(self):
@@ -107,22 +107,31 @@ class ZeroD:
 
 	def __init__(self, path, dummy=False):
 		'Generate Object with the desired functions'
-		self.exe_path = path
-		self.dummy_write = dummy
-		self.extra_wipe = False
+		self.path = path
+		self.dummy = dummy
+		self.extra = False
 
-	def launch(self, targetpath, targetsize=None, blocksize=None, log=None):
+	def launch(self, targetpath, targetsize=None, blocksize=None):
 		'Set file or drive to write to'
-		cmd = [self.exe_path, targetpath]
+		cmd = [self.path, targetpath]
 		if targetsize:
 			cmd.append(str(targetsize))
 		if blocksize:
 			cmd.append(str(blocksize))
-		if self.extra_wipe:
+		if self.extra:
 			cmd.append('/x')
-		if self.dummy_write:
+		if self.dummy:
 			cmd.append('/d')
-		self.proc = Popen(cmd, stdout=log.filehandler, stderr=log.filehandler)
+		return Popen(cmd, stdout=PIPE, bufsize=0, universal_newlines=True)
+		#	cmd,
+		#	stdout = PIPE,
+		#	stderr = STDOUT,
+		#	bufsize=1,
+		#	shell = True,
+		#	encoding = 'utf-8',
+		#	universal_newlines = True,
+		#	errors = 'replace'
+		#)
 
 class Gui(CTk, WinUtils):
 	'GUI look and feel'
@@ -316,29 +325,40 @@ class Gui(CTk, WinUtils):
 	def wipe_files(self):
 		'Wipe selected file or files'
 		self.decode_settings()
-		files = askopenfilenames(title=self.conf['TEXT']['filestowipe'], initialdir=self.conf['DEFAULT']['initialdir'])
-		if len(files) > 0:
+		self.work_target = askopenfilenames(
+			title=self.conf['TEXT']['filestowipe'],
+			initialdir=self.conf['DEFAULT']['initialdir']
+		)
+		if len(self.work_target) > 0:
 			question = self.conf['TEXT']['filewarning']
-			for file in files:
+			for file in self.work_target:
 				question += f'\n{file}'
 			if self.confirm(question):
 				self.workframe()
-				self.extra_wipe = self.options['extra']
-				self.zthread = Thread(target=self.work_files, args=('TESTARG', 3))
-				self.zthread.start()
+				self.zerod.wipe = self.options['extra']
+				self.work_files_thread = Thread(target=self.work_files)
+				self.work_files_thread.start()
 				return
 		self.refresh()
 
-	def work_files(self, testtext, testt):
+	def work_files(self):
 		'Do the work with zerod'
-				
-		self.head_info.set('Head')
-		self.main_info.set('Main: ' + testtext)
-		
-		sleep(testt)
-		
-		self.main_info.set(f'{testt} sec to end of thread...')
-		sleep(testt)
+		self.main_info.set('Main')
+		for file in self.work_target:
+			self.head_info.set(file)
+			proc = self.zerod.launch(file)
+			for msg_raw in proc.stdout:
+				msg_split = msg_raw.split()
+				msg = msg_raw.strip()
+				print(msg)
+				if msg_split[0] == '...':
+					self.main_info.set(msg)
+					self.progressbar.set(float(msg_split[1]) / float(msg_split[3]))
+					
+
+		self.deiconify()
+		self.update()
+		self.work_frame.destroy()
 		
 		#self.work_frame.destroy()
 
