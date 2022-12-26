@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 __author__ = 'Markus Thilo'
-__version__ = '0.1_2022-12-24'
+__version__ = '0.1_2022-12-26'
 __license__ = 'GPL-3'
 __email__ = 'markus.thilo@gmail.com'
 __status__ = 'Under Construction'
@@ -12,9 +12,11 @@ from pathlib import Path
 from configparser import ConfigParser
 from wmi import WMI
 from functools import partial
-from subprocess import Popen, PIPE
+from subprocess import Popen
 from time import sleep
-from customtkinter import CTk
+from datetime import datetime
+from threading import Thread
+from customtkinter import CTk, CTkToplevel
 from customtkinter import set_appearance_mode
 from customtkinter import set_default_color_theme
 from customtkinter import CTkFrame, CTkButton, CTkLabel
@@ -79,6 +81,27 @@ class WinUtils:
 			if part.Antecedent.DiskIndex == diskindex:
 				yield part
 
+class LogFile:
+	'Log to file'
+	
+	def __init__(self, filepath):
+		'Open log file'
+		self.filehandler = open(filepath, 'w')
+		self.write_timestamp()
+
+	def close(self):
+		'Close log file'
+		self.write_timestamp()
+		self.filehandler.close()
+
+	def write_timestamp(self):
+		'Write timestamp to log file'
+		print(self.timestamp(), file=self.filehandler)
+
+	def timestamp(self):
+		'Give timestamp for now'
+		return datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+
 class ZeroD:
 	'Use zerod.exe'
 
@@ -88,7 +111,7 @@ class ZeroD:
 		self.dummy_write = dummy
 		self.extra_wipe = False
 
-	def launch_zproc(self, targetpath, targetsize=None, blocksize=None):
+	def launch(self, targetpath, targetsize=None, blocksize=None, log=None):
 		'Set file or drive to write to'
 		cmd = [self.exe_path, targetpath]
 		if targetsize:
@@ -99,17 +122,9 @@ class ZeroD:
 			cmd.append('/x')
 		if self.dummy_write:
 			cmd.append('/d')
-		self.zproc = Popen(cmd, stdout=PIPE, stderr=PIPE, text=True)
+		self.proc = Popen(cmd, stdout=log.filehandler, stderr=log.filehandler)
 
-	def read_zproc(self):
-		'Communicate with running zerod.exe'
-		while True:
-			stdout = self.zproc.stdout.readline()
-			if not stdout and self.zproc.poll() != None:
-				break
-			yield stdout
-
-class Gui(CTk, WinUtils, ZeroD):
+class Gui(CTk, WinUtils):
 	'GUI look and feel'
 
 	CONFIG = 'hdzero.conf'
@@ -127,17 +142,18 @@ class Gui(CTk, WinUtils, ZeroD):
 
 	def __init__(self):
 		'Base Configuration'
+		CTk.__init__(self)
+		WinUtils.__init__(self)
 		parentpath = Path(__file__).parent
 		self.conf = Config(parentpath/self.CONFIG)
 		self.conf.read()
-		ZeroD.__init__(self, parentpath/self.ZEROD, dummy = self.conf['DEFAULT']['extra'])
-		WinUtils.__init__(self)
+		self.zerod = ZeroD(parentpath/self.ZEROD, dummy = self.conf['DEFAULT']['extra'])
 		self.settings = dict()
-		CTk.__init__(self)
 		set_appearance_mode(self.conf['APPEARANCE']['mode'])
 		set_default_color_theme(self.conf['APPEARANCE']['color_theme'])
 		self.title(self.conf['TEXT']['title'])
-		self.iconphoto(False, PhotoImage(file=parentpath/self.APPICON))
+		self.app_icon = PhotoImage(file=parentpath/self.APPICON)
+		self.iconphoto(False, self.app_icon)
 		self.mainframe()
 
 	def readable(self, size):
@@ -199,7 +215,7 @@ class Gui(CTk, WinUtils, ZeroD):
 		self.file_frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
 		frame = CTkFrame(self.file_frame)
 		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
-		CTkButton(frame, text=self.conf['TEXT']['wipefile'], command=self.wipe_file).pack(
+		CTkButton(frame, text=self.conf['TEXT']['wipefile'], command=self.wipe_files).pack(
 			padx=self.PAD, pady=self.PAD, side='left')
 		self.settings['deletefile'] = BooleanVar(value=self.conf['DEFAULT']['deletefile'])
 		CTkCheckBox(master=frame, text=self.conf['TEXT']['deletefile'], variable=self.settings['deletefile'],
@@ -250,8 +266,10 @@ class Gui(CTk, WinUtils, ZeroD):
 
 	def workframe(self):
 		'Define Work Frame to show Progress'
-		self.work_frame = CTkFrame(self)
-		self.work_frame.pack()
+		self.work_frame = CTkToplevel(self)
+		self.work_frame.title(self.conf['TEXT']['wipefile'])
+		self.work_frame.iconphoto(False, self.app_icon)
+		self.withdraw()
 		frame = CTkFrame(self.work_frame)
 		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
 		self.head_info = StringVar()
@@ -266,8 +284,14 @@ class Gui(CTk, WinUtils, ZeroD):
 		)
 		self.progressbar.set(0)
 		self.progressbar.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
-		CTkButton(frame, text=self.conf['TEXT']['quit'], command=self.quit_app).pack(
+		CTkButton(frame, text=self.conf['TEXT']['abort'], command=self.abort_work).pack(
 			padx=self.PAD, pady=self.PAD, side='right')
+
+	def abort_work(self):
+		'Write config an quit'
+		self.work_frame.destroy()
+		self.deiconify()
+		self.update()
 
 	def wipe_disk(self, diskindex):
 		'Wipe selected disk'
@@ -289,7 +313,7 @@ class Gui(CTk, WinUtils, ZeroD):
 			######
 		self.refresh()
 
-	def wipe_file(self):
+	def wipe_files(self):
 		'Wipe selected file or files'
 		self.decode_settings()
 		files = askopenfilenames(title=self.conf['TEXT']['filestowipe'], initialdir=self.conf['DEFAULT']['initialdir'])
@@ -298,19 +322,50 @@ class Gui(CTk, WinUtils, ZeroD):
 			for file in files:
 				question += f'\n{file}'
 			if self.confirm(question):
-				self.main_frame.destroy()
 				self.workframe()
 				self.extra_wipe = self.options['extra']
-				for file in files:
-					self.launch_zproc(Path(file))
-					for stdout in self.read_zproc():
-						self.main_info.set(stdout)
-						stdout_split = stdout.split()
-						if stdout_split[0] == '...':
-							self.progressbar.set(int(stdout_split[1])/int(stdout_split[3]))
+				self.zthread = Thread(target=self.work_files, args=('TESTARG', 3))
+				self.zthread.start()
+				return
+		self.refresh()
 
+	def work_files(self, testtext, testt):
+		'Do the work with zerod'
+				
+		self.head_info.set('Head')
+		self.main_info.set('Main: ' + testtext)
 		
-		#self.refresh()
+		sleep(testt)
+		
+		self.main_info.set(f'{testt} sec to end of thread...')
+		sleep(testt)
+		
+		#self.work_frame.destroy()
+
+		#self.quit_app()
+
+		#self.logpath = Path(self.conf['DEFAULT']['log'])
+		#self.zlog = LogFile(self.logpath)
+				
+		#with open (self.logpath, 'r') as follow:
+		#	for file in files:
+		#		self.zerod.launch(Path(file), log=self.zlog)
+		#		thread
+		#	self.read_zproc()
+		#	for stdout in self.read_zproc():
+		#		self.main_info.set(stdout)
+		#		stdout_split = stdout.split()
+		#		if stdout_split[0] == '...':
+		#			self.progressbar.set(int(stdout_split[1])/int(stdout_split[3]))
+		#self.zlog.close()
+
+		#while True:
+		#	line = follow.readline()
+		#	if line:
+		#		print(line)
+		#		continue
+		#	sleep(.1)
+
 
 if __name__ == '__main__':  # start here
 	Gui().mainloop()
