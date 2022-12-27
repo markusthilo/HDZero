@@ -1,4 +1,4 @@
-/* zerod v0.1-20221226 */
+/* zerod v0.1-20221227 */
 /* written for Windows + MinGW */
 /* Author: Markus Thilo' */
 /* E-mail: markus.thilo@gmail.com */
@@ -123,6 +123,7 @@ ULONGLONG dummy_write_blocks(
 	char *bytesof
 	)
 {
+	clock_t start = clock();
 	while ( written < towrite && dummycnt-- > 1 ) {
 		written += blocksize;
 		if ( written > towrite ) break;
@@ -207,13 +208,15 @@ int main(int argc, char **argv) {
 		error_close(fh);
 	}
 	/* End of CLI */
+	if ( dummy ) printf("Dummy mode, nothing will be written to disk\n");
+	if ( xtrasave ) printf("Pass 1 of 2, writing random bytes\n");
+	else printf("Pass 1 of 1, writing zeros\n");
+	fflush(stdout);
+	
+	
 	char *bytesof = (char*)malloc(32 * sizeof(char));	//  to print written bytes
 	sprintf(bytesof, " of %llu bytes\n", towrite);
 	if ( dummy ) {	// dummy mode
-		printf("Dummy mode, nothing will be written to disk\n");
-		if ( xtrasave ) printf("First pass: Writing random bytes\n");
-		else printf("Writing zeros\n");
-		fflush(stdout);
 		if ( towrite > MINCALCSIZE && blocksize == 0 ) {
 			printf("Calculating best block size\n");
 			fflush(stdout);
@@ -232,7 +235,7 @@ int main(int argc, char **argv) {
 		blocksize = MAXBLOCKSIZE;
 		written = dummy_write_blocks(DUMMYCNT, DUMMYSLEEP, towrite, written, blocksize, bytesof);
 		if ( xtrasave ) {
-			printf("Second pass: Writing zeros\n");
+			printf("Pass 2 of 2, writing zeros\n");
 			fflush(stdout);
 			written = dummy_write_blocks(DUMMYCNT, DUMMYSLEEP, towrite, 0, blocksize, bytesof);
 		}
@@ -283,7 +286,7 @@ int main(int argc, char **argv) {
 		written = write_blocks(fh, maxblock, towrite, written, blocksize, pinterval, bytesof);
 		/* Second passs */
 		if ( xtrasave ) {
-			printf("Second pass: Writing zeros\n");
+			printf("Pass 2 of 2, writing zeros\n");
 			fflush(stdout);
 			memset(maxblock, 0, sizeof(maxblock));	// fill array with zeros
 			close_handle(fh);	// close

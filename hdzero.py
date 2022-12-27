@@ -25,11 +25,11 @@ from customtkinter import CTkCheckBox
 from customtkinter import CTkProgressBar
 from tkinter import StringVar, BooleanVar, PhotoImage
 from tkinter import CENTER
-from tkinter.messagebox import askquestion
+from tkinter.messagebox import askquestion, showwarning, showerror
 from tkinter.filedialog import askopenfilenames
 
 class Config(ConfigParser):
-	'Handle config file hdprepare.conf'
+	'Handle config file'
 
 	def __init__(self, path):
 		'Set path config file by giving app directory'
@@ -59,27 +59,53 @@ class WinUtils:
 			yield drives[i]
 
 	def get_drive(self, diskindex):
+		'Get DiskDrive to given DiskIndex'
 		for drive in self.conn.Win32_DiskDrive():
 			if drive.index == diskindex:
 				return drive
 
-	def list_partitions(self, diskindex):
-		print('########## DiskDrive: ##########')
-		for drive in self.conn.Win32_DiskDrive():
-			print(drive)
-		print('########## Volume: ##########')
-		for vol in self.conn.Win32_Volume():
-			print(vol)
-		print('########## LogicalDiskToPartition: ##########')
-		for part in self.conn.Win32_LogicalDiskToPartition():
-			print(part)
-		print('########## DiskDriveToDiskPartition: ##########')
-		for part in self.conn.Win32_DiskDriveToDiskPartition():
-			print(part)
-		print('########################################')
+	def get_partitions(self, diskindex):
+		'Get Partition to given DiskIndex'
 		for part in self.conn.Win32_LogicalDiskToPartition():
 			if part.Antecedent.DiskIndex == diskindex:
 				yield part
+
+	def dismount_drives(self, driveletters):
+		'Dismount Drives'
+		notdismounted = list()
+		for driveletter in driveletters:
+			proc = Popen(['mountvol', driveletter, '/p'], stdout=PIPE, stderr=PIPE)
+			if proc.wait() != 0:
+				notdismounted.append(driveletter)
+		return notdismounted
+
+	def gen_diskpart(self, driveid, size, label, letter, table='gpt', fs='ntfs'):
+		try:
+			driveno = int(driveid[17:])
+		except ValueError:
+			return True
+		script = f'''select disk {driveno}
+clean
+convert {table}
+create partition primary size={size}
+format quick fs={fs} label={label}
+assign letter={letter}
+'''
+		print(script)
+		#print('########## DiskDrive: ##########')
+		#for drive in self.conn.Win32_DiskDrive():
+		#	print(drive)
+		#print('########## Volume: ##########')
+		#for vol in self.conn.Win32_Volume():
+		#	print(vol)
+		#print('########## LogicalDiskToPartition: ##########')
+		#for part in self.conn.Win32_LogicalDiskToPartition():
+		#	print(part)
+		#print('########## DiskDriveToDiskPartition: ##########')
+		#for part in self.conn.Win32_DiskDriveToDiskPartition():
+		#	print(part)
+		#print('########################################')
+
 
 class LogFile:
 	'Log to file'
@@ -109,29 +135,19 @@ class ZeroD:
 		'Generate Object with the desired functions'
 		self.path = path
 		self.dummy = dummy
-		self.extra = False
 
-	def launch(self, targetpath, targetsize=None, blocksize=None):
+	def launch(self, targetpath, targetsize=None, blocksize=None, extra=False):
 		'Set file or drive to write to'
 		cmd = [self.path, targetpath]
 		if targetsize:
 			cmd.append(str(targetsize))
 		if blocksize:
 			cmd.append(str(blocksize))
-		if self.extra:
+		if extra:
 			cmd.append('/x')
 		if self.dummy:
 			cmd.append('/d')
 		return Popen(cmd, stdout=PIPE, bufsize=0, universal_newlines=True)
-		#	cmd,
-		#	stdout = PIPE,
-		#	stderr = STDOUT,
-		#	bufsize=1,
-		#	shell = True,
-		#	encoding = 'utf-8',
-		#	universal_newlines = True,
-		#	errors = 'replace'
-		#)
 
 class Gui(CTk, WinUtils):
 	'GUI look and feel'
@@ -141,6 +157,7 @@ class Gui(CTk, WinUtils):
 	APPICON = 'icon.png'
 	PAD = 10
 	SLIMPAD = 4
+	LABELWIDTH = 400
 	BARWIDTH = 200
 	BARHEIGHT = 20
 	
@@ -156,7 +173,7 @@ class Gui(CTk, WinUtils):
 		parentpath = Path(__file__).parent
 		self.conf = Config(parentpath/self.CONFIG)
 		self.conf.read()
-		self.zerod = ZeroD(parentpath/self.ZEROD, dummy = self.conf['DEFAULT']['extra'])
+		self.zerod = ZeroD(parentpath/self.ZEROD, dummy = self.conf['DEBUG']['dummy'])
 		self.settings = dict()
 		set_appearance_mode(self.conf['APPEARANCE']['mode'])
 		set_default_color_theme(self.conf['APPEARANCE']['color_theme'])
@@ -171,7 +188,8 @@ class Gui(CTk, WinUtils):
 			size = int(size)
 		except TypeError:
 			return self.conf['TEXT']['undetected']
-		outstr = f'{size} B'
+		bytes_str = self.conf['TEXT']['bytes']
+		outstr = f'{size} {bytes_str}'
 		for base in self.SIZEBASE:
 			for apx, b in base.items():
 				res = size/b
@@ -199,12 +217,17 @@ class Gui(CTk, WinUtils):
 		self.settings['volname'] = StringVar(value=self.conf['DEFAULT']['volname'])
 		CTkEntry(opt_frame, textvariable=self.settings['volname']).pack(
 			padx=self.PAD, pady=self.PAD, side='left')
+		self.settings['parttable'] = StringVar(value=self.conf['DEFAULT']['parttable'])
+		CTkRadioButton(master=opt_frame, variable=self.settings['parttable'], value='gpt', text='GPT').pack(
+			padx=self.PAD, pady=self.PAD, side='left')
+		CTkRadioButton(master=opt_frame, variable=self.settings['parttable'], value='mbr', text='MBR').pack(
+			padx=self.PAD, pady=self.PAD, side='left')
 		self.settings['fs'] = StringVar(value=self.conf['DEFAULT']['fs'])
-		CTkRadioButton(master=opt_frame, variable=self.settings['fs'], value='NTFS', text='NTFS').pack(
+		CTkRadioButton(master=opt_frame, variable=self.settings['fs'], value='NTFS', text='ntfs').pack(
 			padx=self.PAD, pady=self.PAD, side='left')
-		CTkRadioButton(master=opt_frame, variable=self.settings['fs'], value='exFAT', text='exFAT').pack(
+		CTkRadioButton(master=opt_frame, variable=self.settings['fs'], value='exFAT', text='exfat').pack(
 			padx=self.PAD, pady=self.PAD, side='left')
-		CTkRadioButton(master=opt_frame, variable=self.settings['fs'], value='FAT', text='FAT').pack(
+		CTkRadioButton(master=opt_frame, variable=self.settings['fs'], value='FAT', text='fat').pack(
 			padx=self.PAD, pady=self.PAD, side='left')
 		self.settings['writelog'] = BooleanVar(value=self.conf['DEFAULT']['writelog'])
 		CTkCheckBox(master=opt_frame, text=self.conf['TEXT']['writelog'], variable=self.settings['writelog'],
@@ -264,17 +287,18 @@ class Gui(CTk, WinUtils):
 		'Additional Confirmations'
 		question += '\n\n\n'
 		question += self.conf['TEXT']['areyoushure']
-		if not askquestion(self.conf['TEXT']['title'], question) == 'yes':
+		if not askquestion(self.conf['TEXT']['warning_title'], question) == 'yes':
 			return False
 		if self.options['askmore'] and not (
-			askquestion(self.conf['TEXT']['title'], self.conf['TEXT']['areyoureallyshure']) == 'yes'
-			and askquestion(self.conf['TEXT']['title'], self.conf['TEXT']['areyoufngshure']) == 'yes'
+			askquestion(self.conf['TEXT']['warning_title'], self.conf['TEXT']['areyoureallyshure']) == 'yes'
+			and askquestion(self.conf['TEXT']['warning_title'], self.conf['TEXT']['areyoufngshure']) == 'yes'
 		):
 			return False
 		return True
 
 	def workframe(self):
 		'Define Work Frame to show Progress'
+		self.working = True
 		self.work_frame = CTkToplevel(self)
 		self.work_frame.title(self.conf['TEXT']['wipefile'])
 		self.work_frame.iconphoto(False, self.app_icon)
@@ -282,9 +306,12 @@ class Gui(CTk, WinUtils):
 		frame = CTkFrame(self.work_frame)
 		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
 		self.head_info = StringVar()
-		CTkLabel(frame, textvariable=self.head_info).pack(padx=self.PAD, pady=self.PAD)
+		CTkLabel(frame, textvariable=self.head_info, width=self.LABELWIDTH).pack(
+			padx=self.PAD, pady=self.PAD)
 		self.main_info = StringVar()
 		CTkLabel(frame, textvariable=self.main_info).pack(padx=self.PAD, pady=self.PAD)
+		self.progress_info = StringVar()
+		CTkLabel(frame, textvariable=self.progress_info).pack(padx=self.PAD, pady=self.PAD)
 		self.progressbar = CTkProgressBar(
 			master = frame,
 			width = self.BARWIDTH,
@@ -293,37 +320,107 @@ class Gui(CTk, WinUtils):
 		)
 		self.progressbar.set(0)
 		self.progressbar.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
-		CTkButton(frame, text=self.conf['TEXT']['abort'], command=self.abort_work).pack(
+		CTkButton(frame, text=self.conf['TEXT']['quit'], command=self.quit_work).pack(
 			padx=self.PAD, pady=self.PAD, side='right')
 
-	def abort_work(self):
+	def quit_work(self):
 		'Write config an quit'
+		if self.working:
+			if self.confirm(self.conf['TEXT']['abort']):
+				self.working = False
+				self.zerod_proc.terminate()
 		self.work_frame.destroy()
 		self.deiconify()
 		self.update()
 
+	def watch_zerod(self, files_of_str = ''):
+		'Handle output of zerod'
+		of_str = self.conf['TEXT']['of']
+		pass_str = self.conf['TEXT']['pass']
+		bytes_str = self.conf['TEXT']['bytes']
+		testing_blocksize_str = self.conf['TEXT']['testing_blocksize']
+		using_blocksize_str = self.conf['TEXT']['using_blocksize']
+		pass_of_str = ''
+		for msg_raw in self.zerod_proc.stdout:
+			msg_split = msg_raw.split()
+			msg = msg_raw.strip()
+			print(msg)
+			if msg_split[0] == '...':
+				progress_str = files_of_str + pass_of_str + ' '
+				progress_str += f'{msg_split[1]} {of_str} {msg_split[3]} {bytes_str}'
+				self.progress_info.set(progress_str)
+				self.progressbar.set(float(msg_split[1]) / float(msg_split[3]))
+			elif msg_split[0] == 'Pass':
+				if self.options['extra']:
+					pass_of_str = f'{pass_str} {msg_split[1]} {of_str} {msg_split[3]}'
+			elif msg_split[0] == 'Testing':
+				self.main_info.set(f'{testing_blocksize_str} {msg_split[3]} {bytes_str}')
+			elif msg_split[0] == 'Using':
+				self.blocksize = msg_split[3]
+				self.main_info.set(f'{using_blocksize_str} {self.blocksize} {bytes_str}')
+			else:
+				self.main_info.set(msg)
+
 	def wipe_disk(self, diskindex):
-		'Wipe selected disk'
+		'Wipe selected disk - launch thread'
 		self.decode_settings()
 		drive = self.get_drive(diskindex)
+		
+		self.gen_diskpart(
+			drive.DeviceID,
+			drive.Size,
+			self.options['volname'],
+			'Z:',
+			table = self.options['parttable'],
+			fs = self.options['fs']
+		)
+
+		
 		question = self.conf['TEXT']['drivewarning']
-		question += f'\n\n{drive.DeviceId}\n{drive.Caption}, {drive.MediaType}\n'
+		question += f'\n\n{drive.DeviceID}\n{drive.Caption}, {drive.MediaType}\n'
 		question += self.readable(drive.Size) + '\n\n'
 		mounted = ''
-		for part in self.list_partitions(diskindex):
-			mounted += f'\n\n{part.Dependent.DeviceID}\n{part.Antecedent.DeviceID}\n{part.Dependent.Description}\n'
+		driveletters = list()
+		for part in self.get_partitions(diskindex):
+			driveletters.append(part.Dependent.DeviceID)
+			mounted += f'\n\n{part.Dependent.DeviceID}\n'
+			mounted += f'{part.Antecedent.DeviceID}\n{part.Dependent.Description}\n'
 			mounted += self.readable(part.Dependent.Size)
 		if mounted != '':
 			question += self.conf['TEXT']['mounted'] + mounted
 		else:
 			question += self.conf['TEXT']['nomounted']
 		if self.confirm(question):
-			print('Work to do')
-			######
+			notdismounted = self.dismount_drives(driveletters)
+			if notdismounted != list():
+				warning = self.conf['TEXT']['not_dismount'] + ' '
+				warning += ', '.join(notdismounted)
+				warning += '\n\n' + self.conf['TEXT']['dismount_manually']
+				showwarning(title=self.conf['TEXT']['warning_title'], message=warning)
+			else:
+				self.work_target = drive.DeviceID
+				self.work_targetsize = drive.Size
+				self.work_files_thread = Thread(target=self.work_drive)
+				self.work_files_thread.start()
+				return
 		self.refresh()
 
+	def work_drive(self):
+		'Do the work with zerod, target is a drve'
+		self.workframe()
+		self.head_info.set(self.work_target)
+		self.zerod_proc = self.zerod.launch(
+			self.work_target,
+			targetsize = self.work_targetsize,
+			extra = self.options['extra']
+		)
+		self.watch_zerod()
+		self.main_info.set(self.conf['TEXT']['all_done'])
+		self.progress_info.set(f'100%, {self.readable(self.work_targetsize)}')
+		self.working = False
+
 	def wipe_files(self):
-		'Wipe selected file or files'
+		'Wipe selected file or files - launch thread'
 		self.decode_settings()
 		self.work_target = askopenfilenames(
 			title=self.conf['TEXT']['filestowipe'],
@@ -334,58 +431,41 @@ class Gui(CTk, WinUtils):
 			for file in self.work_target:
 				question += f'\n{file}'
 			if self.confirm(question):
-				self.workframe()
-				self.zerod.wipe = self.options['extra']
 				self.work_files_thread = Thread(target=self.work_files)
 				self.work_files_thread.start()
 				return
 		self.refresh()
 
 	def work_files(self):
-		'Do the work with zerod'
-		self.main_info.set('Main')
+		'Do the work with zerod on targetrd files'
+		self.workframe()
+		of_str = self.conf['TEXT']['of']
+		file_str = self.conf['TEXT']['file']
+		files_of_str = ''
+		qt_files = len(self.work_target)
+		file_cnt = 0
+		self.blocksize = None
 		for file in self.work_target:
 			self.head_info.set(file)
-			proc = self.zerod.launch(file)
-			for msg_raw in proc.stdout:
-				msg_split = msg_raw.split()
-				msg = msg_raw.strip()
-				print(msg)
-				if msg_split[0] == '...':
-					self.main_info.set(msg)
-					self.progressbar.set(float(msg_split[1]) / float(msg_split[3]))
-					
-
-		self.deiconify()
-		self.update()
-		self.work_frame.destroy()
-		
-		#self.work_frame.destroy()
-
-		#self.quit_app()
-
-		#self.logpath = Path(self.conf['DEFAULT']['log'])
-		#self.zlog = LogFile(self.logpath)
-				
-		#with open (self.logpath, 'r') as follow:
-		#	for file in files:
-		#		self.zerod.launch(Path(file), log=self.zlog)
-		#		thread
-		#	self.read_zproc()
-		#	for stdout in self.read_zproc():
-		#		self.main_info.set(stdout)
-		#		stdout_split = stdout.split()
-		#		if stdout_split[0] == '...':
-		#			self.progressbar.set(int(stdout_split[1])/int(stdout_split[3]))
-		#self.zlog.close()
-
-		#while True:
-		#	line = follow.readline()
-		#	if line:
-		#		print(line)
-		#		continue
-		#	sleep(.1)
-
+			self.zerod_proc = self.zerod.launch(
+				file,
+				blocksize = self.blocksize,
+				extra = self.options['extra']
+			)
+			if qt_files > 1:
+				file_cnt += 1
+				files_of_str = f'{file_str} {file_cnt} {of_str} {qt_files}, '
+			self.watch_zerod(files_of_str=files_of_str)
+			if not self.working:
+				return
+			if self.zerod_proc.wait() == 0:
+				self.main_info.set(self.conf['TEXT']['deleting_file'])
+				if not self.zerod.dummy:
+					Path(file).unlink()
+		self.head_info.set('')
+		self.main_info.set(self.conf['TEXT']['all_done'])
+		self.progress_info.set('100 %')
+		self.working = False
 
 if __name__ == '__main__':  # start here
 	Gui().mainloop()
