@@ -46,6 +46,27 @@ class Config(ConfigParser):
 		with open(self.path, 'w') as fh:
 			super().write(fh)
 
+class ZeroD:
+	'Use zerod.exe'
+
+	def __init__(self, path, dummy=False):
+		'Generate Object with the desired functions'
+		self.path = path
+		self.dummy = dummy
+
+	def launch(self, targetpath, targetsize=None, blocksize=None, extra=False):
+		'Set file or drive to write to'
+		cmd = [self.path, targetpath]
+		if targetsize:
+			cmd.append(str(targetsize))
+		if blocksize:
+			cmd.append(str(blocksize))
+		if extra:
+			cmd.append('/x')
+		if self.dummy:
+			cmd.append('/d')
+		return Popen(cmd, stdout=PIPE, bufsize=0, universal_newlines=True)
+
 class WinUtils:
 	'Needed Windows functions'
 
@@ -117,49 +138,38 @@ assign letter={letter}
 		#self.tmpscriptpath.unlink()
 		#return res
 
-class LogFile:
+class Logging:
 	'Log to file'
 	
-	def __init__(self, intro):
+	def __init__(self, parentpath):
+		'Generate logging'
+		self.log_header_path = parentpath / 'logheader.txt'
+	
+	def start_log(self):
 		'Open log file'
-		self.log = self.timestamp()
-		self.append(intro)
+		with open(self.log_header_path, 'r') as fh:
+			self.log_string = fh.read()
+		self.append(self.timestamp())
 
-	def append(self, info):
+	def append_log(self, info):
 		'Append to log'
-		self.log += f'{info}/n'
+		self.log_string += f'{info}/n'
 
-	def write(self, driveletter):
+	def write_log(self, driveletter):
 		'Write log file'
 		with open(Path(driveletter + '\\')/'hdzero-log.txt', 'w') as fh:
-			fh.write(self.log)
+			fh.write(self.log_string)
 
 	def timestamp(self):
 		'Give timestamp for now'
 		return datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
 
-class ZeroD:
-	'Use zerod.exe'
+	def notepad_log_header(self):
+		'Edit log header file with Notepad'
+		proc = Popen(['notepad', self.log_header_path], stdout=PIPE, stderr=PIPE)
+		proc.wait()
 
-	def __init__(self, path, dummy=False):
-		'Generate Object with the desired functions'
-		self.path = path
-		self.dummy = dummy
-
-	def launch(self, targetpath, targetsize=None, blocksize=None, extra=False):
-		'Set file or drive to write to'
-		cmd = [self.path, targetpath]
-		if targetsize:
-			cmd.append(str(targetsize))
-		if blocksize:
-			cmd.append(str(blocksize))
-		if extra:
-			cmd.append('/x')
-		if self.dummy:
-			cmd.append('/d')
-		return Popen(cmd, stdout=PIPE, bufsize=0, universal_newlines=True)
-
-class Gui(CTk, WinUtils):
+class Gui(CTk, WinUtils, Logging):
 	'GUI look and feel'
 
 	CONFIG = 'hdzero.conf'
@@ -185,6 +195,7 @@ class Gui(CTk, WinUtils):
 		self.settings = dict()
 		CTk.__init__(self)
 		WinUtils.__init__(self, parentpath)
+		Logging.__init__(self, parentpath)
 		set_appearance_mode(self.conf['APPEARANCE']['mode'])
 		set_default_color_theme(self.conf['APPEARANCE']['color_theme'])
 		self.title(self.conf['TEXT']['title'])
@@ -221,31 +232,36 @@ class Gui(CTk, WinUtils):
 		self.drive_frame.pack(padx=self.PAD, pady=self.PAD)
 		opt_frame = CTkFrame(self.drive_frame)
 		opt_frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
-		labeltext = self.conf['TEXT']['volname']
-		CTkLabel(opt_frame, text=f'{labeltext}:').pack(
-			padx=self.PAD, pady=self.PAD, side='left')
-		self.settings['volname'] = StringVar(value=self.conf['DEFAULT']['volname'])
-		CTkEntry(opt_frame, textvariable=self.settings['volname']).pack(
-			padx=self.PAD, pady=self.PAD, side='left')
+		### OPTION FRAME ###
+		CTkButton(opt_frame, text=self.conf['TEXT']['refresh'],
+			command=self.refresh).grid(padx=self.PAD, pady=(self.PAD,0), row=0, column=0, sticky='w')
 		self.settings['parttable'] = StringVar(value=self.conf['DEFAULT']['parttable'])
-		CTkRadioButton(master=opt_frame, variable=self.settings['parttable'], value=None,
-			text=self.conf['TEXT']['no_diskpart']).pack(padx=self.PAD, pady=self.PAD, side='left')
-		CTkRadioButton(master=opt_frame, variable=self.settings['parttable'], value='gpt', text='GPT').pack(
-			padx=self.PAD, pady=self.PAD, side='left')
-		CTkRadioButton(master=opt_frame, variable=self.settings['parttable'], value='mbr', text='MBR').pack(
-			padx=self.PAD, pady=self.PAD, side='left')
+		CTkRadioButton(master=opt_frame, variable=self.settings['parttable'],
+			value=None, text=self.conf['TEXT']['no_diskpart']).grid(
+			padx=self.PAD, pady=(self.PAD, 0), row=0, column=1, sticky='w')
+		CTkRadioButton(master=opt_frame, variable=self.settings['parttable'],
+			value='gpt', text='GPT').grid(padx=self.PAD, row=1, column=1, sticky='w')
+		CTkRadioButton(master=opt_frame, variable=self.settings['parttable'],
+			value='mbr', text='MBR').grid(padx=self.PAD, pady=(0, self.PAD), row=2, column=1, sticky='w')
 		self.settings['fs'] = StringVar(value=self.conf['DEFAULT']['fs'])
-		CTkRadioButton(master=opt_frame, variable=self.settings['fs'], value='ntfs', text='NTFS').pack(
-			padx=self.PAD, pady=self.PAD, side='left')
-		CTkRadioButton(master=opt_frame, variable=self.settings['fs'], value='exfat', text='exFAT').pack(
-			padx=self.PAD, pady=self.PAD, side='left')
-		CTkRadioButton(master=opt_frame, variable=self.settings['fs'], value='fat32', text='FAT32').pack(
-			padx=self.PAD, pady=self.PAD, side='left')
+		CTkRadioButton(master=opt_frame, variable=self.settings['fs'],
+			value='ntfs', text='NTFS').grid(padx=self.PAD, pady=(self.PAD, 0), row=0, column=2, sticky='w')
+		CTkRadioButton(master=opt_frame, variable=self.settings['fs'],
+			value='exfat', text='exFAT').grid(padx=self.PAD, row=1, column=2, sticky='w')
+		CTkRadioButton(master=opt_frame, variable=self.settings['fs'],
+			value='fat32', text='FAT32').grid(padx=self.PAD, pady=(0, self.PAD), row=2, column=2, sticky='w')
+		labeltext = self.conf['TEXT']['volname']
+		CTkLabel(opt_frame, text=f'{labeltext}:').grid(padx=self.PAD, pady=(
+			self.PAD, 0), row=0, column=3, sticky='w')
+		self.settings['volname'] = StringVar(value=self.conf['DEFAULT']['volname'])
+		CTkEntry(opt_frame, textvariable=self.settings['volname']).grid(
+			padx=self.PAD, pady=(self.PAD, 0), row=0, column=4, sticky='w')
 		self.settings['writelog'] = BooleanVar(value=self.conf['DEFAULT']['writelog'])
 		CTkCheckBox(master=opt_frame, text=self.conf['TEXT']['writelog'], variable=self.settings['writelog'],
-			onvalue=True, offvalue=False).pack(padx=self.PAD, pady=self.PAD, side='left')
-		CTkButton(opt_frame, text=self.conf['TEXT']['refresh'], command=self.refresh).pack(
-			padx=self.PAD, pady=self.PAD, side='left')
+			onvalue=True, offvalue=False).grid(padx=self.PAD, pady=(0, self.PAD), row=2, column=4, sticky='w')
+		CTkButton(opt_frame, text=self.conf['TEXT']['editlog'],
+			command=self.edit_log_header).grid(padx=self.PAD, pady=(0, self.PAD), row=2, column=3, sticky='w')	
+		### DRIVES ###
 		labeltext = self.conf['TEXT']['wipedrive']
 		for drive in self.list_drives():
 			frame = CTkFrame(self.drive_frame)
@@ -284,6 +300,13 @@ class Gui(CTk, WinUtils):
 		for option, value in self.options.items():
 			self.conf['DEFAULT'][option] = str(value)
 		self.conf.write()
+
+	def edit_log_header(self):
+		'Edit log header'
+		self.withdraw()
+		self.notepad_log_header()
+		self.deiconify()
+		self.update()
 
 	def refresh(self):
 		self.decode_settings()
@@ -353,6 +376,8 @@ class Gui(CTk, WinUtils):
 		testing_blocksize_str = self.conf['TEXT']['testing_blocksize']
 		using_blocksize_str = self.conf['TEXT']['using_blocksize']
 		pass_of_str = ''
+		if self.options['writelog']:
+				self.start_log()
 		debug = self.conf['DEBUG']['print']
 		for msg_raw in self.zerod_proc.stdout:
 			msg_split = msg_raw.split()
@@ -378,7 +403,7 @@ class Gui(CTk, WinUtils):
 			else:
 				self.main_info.set(msg)
 			if info and self.options['writelog']:
-				self.log.append(info)
+				self.append_log(info)
 
 	def wipe_disk(self, diskindex):
 		'Wipe selected disk - launch thread'
@@ -421,8 +446,6 @@ class Gui(CTk, WinUtils):
 		'Do the work with zerod, target is a drve'
 		self.workframe()
 		self.head_info.set(self.work_target)
-		if self.options['writelog']:
-			self.log = LogFile(self.conf['DEFAULT']['logintro'])
 		self.zerod_proc = self.zerod.launch(
 			self.work_target,
 			targetsize = self.work_targetsize,
@@ -442,7 +465,7 @@ class Gui(CTk, WinUtils):
 			if mounted:
 				self.main_info.set(self.conf['TEXT']['newpartition'] + f' {mounted}')
 				if self.options['writelog']:
-					self.log.write(mounted)
+					self.write_log(mounted)
 			else:
 				showwarning(
 					title = self.conf['TEXT']['warning_title'],
