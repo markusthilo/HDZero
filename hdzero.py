@@ -11,6 +11,7 @@ __description__ = 'Wipe data'
 from pathlib import Path
 from configparser import ConfigParser
 from wmi import WMI
+from win32api import GetCurrentProcessId, GetLogicalDriveStrings
 from functools import partial
 from subprocess import Popen, PIPE, STDOUT
 from time import sleep
@@ -48,9 +49,10 @@ class Config(ConfigParser):
 class WinUtils:
 	'Needed Windows functions'
 
-	def __init__(self):
+	def __init__(self, parentpath):
 		'Generate Windows tools'
 		self.conn = WMI()
+		self.tmpscriptpath = parentpath / f'_diskpart_script_{GetCurrentProcessId()}.tmp'
 
 	def list_drives(self):
 		'Use DiskDrive'
@@ -79,50 +81,58 @@ class WinUtils:
 				notdismounted.append(driveletter)
 		return notdismounted
 
-	def gen_diskpart(self, driveid, size, label, letter, table='gpt', fs='ntfs'):
+	def create_partition(self, driveid, label, letter=None, table='gpt', fs='ntfs'):
 		try:
 			driveno = int(driveid[17:])
 		except ValueError:
-			return True
-		script = f'''select disk {driveno}
+			return
+		if not letter:
+			usedletters = GetLogicalDriveStrings().split(':\\\x00')
+			for char in range(ord('D'),ord('Z')+1):
+				if not chr(char) in usedletters:
+					letter = chr(char)
+					break
+			else:
+				return
+		else:
+			letter = letter.strip(':')
+		with open(self.tmpscriptpath, 'w') as fh:
+			fh.write(f'''select disk {driveno}
 clean
 convert {table}
-create partition primary size={size}
+create partition primary
 format quick fs={fs} label={label}
 assign letter={letter}
 '''
-		print(script)
-		#print('########## DiskDrive: ##########')
-		#for drive in self.conn.Win32_DiskDrive():
-		#	print(drive)
-		#print('########## Volume: ##########')
-		#for vol in self.conn.Win32_Volume():
-		#	print(vol)
-		#print('########## LogicalDiskToPartition: ##########')
-		#for part in self.conn.Win32_LogicalDiskToPartition():
-		#	print(part)
-		#print('########## DiskDriveToDiskPartition: ##########')
-		#for part in self.conn.Win32_DiskDriveToDiskPartition():
-		#	print(part)
-		#print('########################################')
+			)
 
+		return letter + ':'
+
+		#proc = Popen(['diskpart', '/s', self.tmpscriptpath], stdout=PIPE, stderr=PIPE)
+		#print(self.tmpscriptpath.unlink())
+		#if proc.wait() == 0:
+		#	res = letter + ':'
+		#else:
+		#	res = None
+		#self.tmpscriptpath.unlink()
+		#return res
 
 class LogFile:
 	'Log to file'
 	
-	def __init__(self, filepath):
+	def __init__(self, intro):
 		'Open log file'
-		self.filehandler = open(filepath, 'w+')
-		self.write_timestamp()
+		self.log = self.timestamp()
+		self.append(intro)
 
-	def close(self):
-		'Close log file'
-		self.write_timestamp()
-		self.filehandler.close()
+	def append(self, info):
+		'Append to log'
+		self.log += f'{info}/n'
 
-	def write_timestamp(self):
-		'Write timestamp to log file'
-		print(self.timestamp(), file=self.filehandler)
+	def write(self, driveletter):
+		'Write log file'
+		with open(Path(driveletter + '\\')/'hdzero-log.txt', 'w') as fh:
+			fh.write(self.log)
 
 	def timestamp(self):
 		'Give timestamp for now'
@@ -168,13 +178,13 @@ class Gui(CTk, WinUtils):
 
 	def __init__(self):
 		'Base Configuration'
-		CTk.__init__(self)
-		WinUtils.__init__(self)
 		parentpath = Path(__file__).parent
 		self.conf = Config(parentpath/self.CONFIG)
 		self.conf.read()
 		self.zerod = ZeroD(parentpath/self.ZEROD, dummy = self.conf['DEBUG']['dummy'])
 		self.settings = dict()
+		CTk.__init__(self)
+		WinUtils.__init__(self, parentpath)
 		set_appearance_mode(self.conf['APPEARANCE']['mode'])
 		set_default_color_theme(self.conf['APPEARANCE']['color_theme'])
 		self.title(self.conf['TEXT']['title'])
@@ -218,16 +228,18 @@ class Gui(CTk, WinUtils):
 		CTkEntry(opt_frame, textvariable=self.settings['volname']).pack(
 			padx=self.PAD, pady=self.PAD, side='left')
 		self.settings['parttable'] = StringVar(value=self.conf['DEFAULT']['parttable'])
+		CTkRadioButton(master=opt_frame, variable=self.settings['parttable'], value=None,
+			text=self.conf['TEXT']['no_diskpart']).pack(padx=self.PAD, pady=self.PAD, side='left')
 		CTkRadioButton(master=opt_frame, variable=self.settings['parttable'], value='gpt', text='GPT').pack(
 			padx=self.PAD, pady=self.PAD, side='left')
 		CTkRadioButton(master=opt_frame, variable=self.settings['parttable'], value='mbr', text='MBR').pack(
 			padx=self.PAD, pady=self.PAD, side='left')
 		self.settings['fs'] = StringVar(value=self.conf['DEFAULT']['fs'])
-		CTkRadioButton(master=opt_frame, variable=self.settings['fs'], value='NTFS', text='ntfs').pack(
+		CTkRadioButton(master=opt_frame, variable=self.settings['fs'], value='ntfs', text='NTFS').pack(
 			padx=self.PAD, pady=self.PAD, side='left')
-		CTkRadioButton(master=opt_frame, variable=self.settings['fs'], value='exFAT', text='exfat').pack(
+		CTkRadioButton(master=opt_frame, variable=self.settings['fs'], value='exfat', text='exFAT').pack(
 			padx=self.PAD, pady=self.PAD, side='left')
-		CTkRadioButton(master=opt_frame, variable=self.settings['fs'], value='FAT', text='fat').pack(
+		CTkRadioButton(master=opt_frame, variable=self.settings['fs'], value='fat32', text='FAT32').pack(
 			padx=self.PAD, pady=self.PAD, side='left')
 		self.settings['writelog'] = BooleanVar(value=self.conf['DEFAULT']['writelog'])
 		CTkCheckBox(master=opt_frame, text=self.conf['TEXT']['writelog'], variable=self.settings['writelog'],
@@ -341,10 +353,13 @@ class Gui(CTk, WinUtils):
 		testing_blocksize_str = self.conf['TEXT']['testing_blocksize']
 		using_blocksize_str = self.conf['TEXT']['using_blocksize']
 		pass_of_str = ''
+		debug = self.conf['DEBUG']['print']
 		for msg_raw in self.zerod_proc.stdout:
 			msg_split = msg_raw.split()
 			msg = msg_raw.strip()
-			print(msg)
+			info = None
+			if debug:
+				print(msg)
 			if msg_split[0] == '...':
 				progress_str = files_of_str + pass_of_str + ' '
 				progress_str += f'{msg_split[1]} {of_str} {msg_split[3]} {bytes_str}'
@@ -354,28 +369,21 @@ class Gui(CTk, WinUtils):
 				if self.options['extra']:
 					pass_of_str = f'{pass_str} {msg_split[1]} {of_str} {msg_split[3]}'
 			elif msg_split[0] == 'Testing':
-				self.main_info.set(f'{testing_blocksize_str} {msg_split[3]} {bytes_str}')
+				info = f'{testing_blocksize_str} {msg_split[3]} {bytes_str}'
+				self.main_info.set(info)
 			elif msg_split[0] == 'Using':
 				self.blocksize = msg_split[3]
-				self.main_info.set(f'{using_blocksize_str} {self.blocksize} {bytes_str}')
+				info = f'{using_blocksize_str} {self.blocksize} {bytes_str}'
+				self.main_info.set(info)
 			else:
 				self.main_info.set(msg)
+			if info and self.options['writelog']:
+				self.log.append(info)
 
 	def wipe_disk(self, diskindex):
 		'Wipe selected disk - launch thread'
 		self.decode_settings()
 		drive = self.get_drive(diskindex)
-		
-		self.gen_diskpart(
-			drive.DeviceID,
-			drive.Size,
-			self.options['volname'],
-			'Z:',
-			table = self.options['parttable'],
-			fs = self.options['fs']
-		)
-
-		
 		question = self.conf['TEXT']['drivewarning']
 		question += f'\n\n{drive.DeviceID}\n{drive.Caption}, {drive.MediaType}\n'
 		question += self.readable(drive.Size) + '\n\n'
@@ -398,6 +406,10 @@ class Gui(CTk, WinUtils):
 				warning += '\n\n' + self.conf['TEXT']['dismount_manually']
 				showwarning(title=self.conf['TEXT']['warning_title'], message=warning)
 			else:
+				if driveletters != list():
+					self.driveletter = driveletters[0]
+				else:
+					self.driveletter = None
 				self.work_target = drive.DeviceID
 				self.work_targetsize = drive.Size
 				self.work_files_thread = Thread(target=self.work_drive)
@@ -409,14 +421,35 @@ class Gui(CTk, WinUtils):
 		'Do the work with zerod, target is a drve'
 		self.workframe()
 		self.head_info.set(self.work_target)
+		if self.options['writelog']:
+			self.log = LogFile(self.conf['DEFAULT']['logintro'])
 		self.zerod_proc = self.zerod.launch(
 			self.work_target,
 			targetsize = self.work_targetsize,
 			extra = self.options['extra']
 		)
 		self.watch_zerod()
-		self.main_info.set(self.conf['TEXT']['all_done'])
 		self.progress_info.set(f'100%, {self.readable(self.work_targetsize)}')
+		if self.options['parttable']:
+			self.main_info.set(self.conf['TEXT']['creatingpartition'])
+			mounted = self.create_partition(
+				self.work_target,
+				self.options['volname'],
+				table = self.options['parttable'],
+				fs = self.options['fs'],
+				letter = self.driveletter
+			)
+			if mounted:
+				self.main_info.set(self.conf['TEXT']['newpartition'] + f' {mounted}')
+				if self.options['writelog']:
+					self.log.write(mounted)
+			else:
+				showwarning(
+					title = self.conf['TEXT']['warning_title'],
+					message = self.conf['TEXT']['couldnotcreate']
+				)
+		else:
+			self.main_info.set(self.conf['TEXT']['all_done'])
 		self.working = False
 
 	def wipe_files(self):
@@ -431,6 +464,7 @@ class Gui(CTk, WinUtils):
 			for file in self.work_target:
 				question += f'\n{file}'
 			if self.confirm(question):
+				self.options['writelog'] = False
 				self.work_files_thread = Thread(target=self.work_files)
 				self.work_files_thread.start()
 				return
