@@ -1,0 +1,1 @@
+pyinstaller -w -D -i icon.ico --add-data "C:\Users\THI\AppData\Local\Programs\Python\Python311\Lib\site-packages/customtkinter;customtkinter/" hdzero.py
