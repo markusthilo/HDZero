@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 __author__ = 'Markus Thilo'
-__version__ = '0.1_2022-12-28'
+__version__ = '0.1_2022-12-29'
 __license__ = 'GPL-3'
 __email__ = 'markus.thilo@gmail.com'
 __status__ = 'Under Construction'
@@ -70,10 +70,11 @@ class ZeroD:
 class WinUtils:
 	'Needed Windows functions'
 
-	def __init__(self, parentpath):
+	def __init__(self, parentpath, dummy=False):
 		'Generate Windows tools'
 		self.conn = WMI()
 		self.tmpscriptpath = parentpath / f'_diskpart_script_{GetCurrentProcessId()}.tmp'
+		self.dummy_mode = dummy
 
 	def list_drives(self):
 		'Use DiskDrive'
@@ -96,10 +97,11 @@ class WinUtils:
 	def dismount_drives(self, driveletters):
 		'Dismount Drives'
 		notdismounted = list()
-		for driveletter in driveletters:
-			proc = Popen(['mountvol', driveletter, '/p'], stdout=PIPE, stderr=PIPE)
-			if proc.wait() != 0:
-				notdismounted.append(driveletter)
+		if not self.dummy_mode:
+			for driveletter in driveletters:
+				proc = Popen(['mountvol', driveletter, '/p'], stdout=PIPE, stderr=PIPE)
+				if proc.wait() != 0:
+					notdismounted.append(driveletter)
 		return notdismounted
 
 	def create_partition(self, driveid, label, letter=None, table='gpt', fs='ntfs'):
@@ -126,17 +128,16 @@ format quick fs={fs} label={label}
 assign letter={letter}
 '''
 			)
-
-		return letter + ':'
-
-		#proc = Popen(['diskpart', '/s', self.tmpscriptpath], stdout=PIPE, stderr=PIPE)
-		#print(self.tmpscriptpath.unlink())
-		#if proc.wait() == 0:
-		#	res = letter + ':'
-		#else:
-		#	res = None
-		#self.tmpscriptpath.unlink()
-		#return res
+		if self.dummy_mode:
+			return letter + ':'
+		proc = Popen(['diskpart', '/s', self.tmpscriptpath], stdout=PIPE, stderr=PIPE)
+		print(self.tmpscriptpath.unlink())
+		if proc.wait() == 0:
+			res = letter + ':'
+		else:
+			res = None
+		self.tmpscriptpath.unlink()
+		return res
 
 class Logging:
 	'Log to file'
@@ -145,19 +146,21 @@ class Logging:
 		'Generate logging'
 		self.log_header_path = parentpath / 'logheader.txt'
 	
-	def start_log(self):
+	def start_log(self, info):
 		'Open log file'
-		with open(self.log_header_path, 'r') as fh:
-			self.log_string = fh.read()
-		self.append(self.timestamp())
+		self.log_string = info
+		self.append_log(self.timestamp())
 
 	def append_log(self, info):
 		'Append to log'
-		self.log_string += f'{info}/n'
+		self.log_string += f'{info}\n'
 
-	def write_log(self, driveletter):
+	def write_log(self, logpath):
 		'Write log file'
-		with open(Path(driveletter + '\\')/'hdzero-log.txt', 'w') as fh:
+		with open(self.log_header_path, 'r') as fh:
+			self.log_string = fh.read() + self.log_string
+		self.append_log(self.timestamp())
+		with open(logpath, 'w') as fh:
 			fh.write(self.log_string)
 
 	def timestamp(self):
@@ -188,18 +191,18 @@ class Gui(CTk, WinUtils, Logging):
 
 	def __init__(self):
 		'Base Configuration'
-		parentpath = Path(__file__).parent
-		self.conf = Config(parentpath/self.CONFIG)
-		self.conf.read()
-		self.zerod = ZeroD(parentpath/self.ZEROD, dummy = self.conf['DEBUG']['dummy'])
-		self.settings = dict()
 		CTk.__init__(self)
-		WinUtils.__init__(self, parentpath)
-		Logging.__init__(self, parentpath)
+		self.__file_parentpath__ = Path(__file__).parent
+		self.conf = Config(self.__file_parentpath__/self.CONFIG)
+		self.conf.read()
+		WinUtils.__init__(self, self.__file_parentpath__, dummy=self.conf['DEBUG']['dummy'])
+		Logging.__init__(self, self.__file_parentpath__)
+		self.zerod = ZeroD(self.__file_parentpath__/self.ZEROD, dummy=self.conf['DEBUG']['dummy'])
+		self.settings = dict()
 		set_appearance_mode(self.conf['APPEARANCE']['mode'])
 		set_default_color_theme(self.conf['APPEARANCE']['color_theme'])
 		self.title(self.conf['TEXT']['title'])
-		self.app_icon = PhotoImage(file=parentpath/self.APPICON)
+		self.app_icon = PhotoImage(file=self.__file_parentpath__/self.APPICON)
 		self.iconphoto(False, self.app_icon)
 		self.mainframe()
 
@@ -388,8 +391,6 @@ class Gui(CTk, WinUtils, Logging):
 		testing_blocksize_str = self.conf['TEXT']['testing_blocksize']
 		using_blocksize_str = self.conf['TEXT']['using_blocksize']
 		pass_of_str = ''
-		if self.options['writelog']:
-				self.start_log()
 		debug = self.conf['DEBUG']['print']
 		for msg_raw in self.zerod_proc.stdout:
 			msg_split = msg_raw.split()
@@ -406,13 +407,12 @@ class Gui(CTk, WinUtils, Logging):
 				if self.options['extra']:
 					pass_of_str = f'{pass_str} {msg_split[1]} {of_str} {msg_split[3]}'
 			elif msg_split[0] == 'Testing':
-				info = f'{testing_blocksize_str} {msg_split[3]} {bytes_str}'
-				self.main_info.set(info)
+				self.main_info.set(f'{testing_blocksize_str} {msg_split[3]} {bytes_str}')
 			elif msg_split[0] == 'Using':
 				self.blocksize = msg_split[3]
-				info = f'{using_blocksize_str} {self.blocksize} {bytes_str}'
-				self.main_info.set(info)
+				self.main_info.set(f'{using_blocksize_str} {self.blocksize} {bytes_str}')
 			else:
+				info = msg
 				self.main_info.set(msg)
 			if info and self.options['writelog']:
 				self.append_log(info)
@@ -447,6 +447,14 @@ class Gui(CTk, WinUtils, Logging):
 					self.driveletter = driveletters[0]
 				else:
 					self.driveletter = None
+				if self.options['writelog']:
+					self.start_log(f'''
+{drive.Caption}
+{drive.MediaType}
+{self.readable(drive.Size)}
+
+'''
+					)
 				self.work_target = drive.DeviceID
 				self.work_targetsize = drive.Size
 				self.work_files_thread = Thread(target=self.work_drive)
@@ -475,9 +483,15 @@ class Gui(CTk, WinUtils, Logging):
 				letter = self.driveletter
 			)
 			if mounted:
-				self.main_info.set(self.conf['TEXT']['newpartition'] + f' {mounted}')
+				info = self.conf['TEXT']['newpartition'] + f' {mounted}'
+				self.main_info.set(info)
 				if self.options['writelog']:
-					self.write_log(mounted)
+					if self.conf['DEBUG']['dummy']:
+						self.append_log(info)
+						logpath = self.__file_parentpath__/f'dummy-log.txt'
+					else:
+						logpath = Path(mounted + '\\')/'hdzero-log.txt'
+					self.write_log(logpath)
 			else:
 				showwarning(
 					title = self.conf['TEXT']['warning_title'],
