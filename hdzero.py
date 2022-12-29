@@ -223,6 +223,13 @@ class Gui(CTk, WinUtils, Logging):
 					break
 		return outstr
 
+	def list_to_string(self, strings):
+		'One per line'
+		if len(strings) <= 20:
+			return ':\n' + '\n '.join(strings)
+		else:
+			return ':\n' + '\n '.join(strings[:20]) + f'\n... {len(strings)-20} ' + self.conf['TEXT']['more']
+
 	def mainframe(self):
 		'Define Main Frame'
 		self.main_frame = CTkFrame(self)
@@ -256,7 +263,7 @@ class Gui(CTk, WinUtils, Logging):
 			value='fat32', text='FAT32').grid(padx=self.PAD, pady=(0, self.PAD), row=2, column=2, sticky='w')
 		labeltext = self.conf['TEXT']['volname']
 		CTkLabel(opt_frame, text=f'{labeltext}:').grid(padx=self.PAD, pady=(
-			self.PAD, 0), row=0, column=3, sticky='w')
+			self.PAD, 0), row=0, column=3, sticky='e')
 		self.settings['volname'] = StringVar(value=self.conf['DEFAULT']['volname'])
 		CTkEntry(opt_frame, textvariable=self.settings['volname']).grid(
 			padx=self.PAD, pady=(self.PAD, 0), row=0, column=4, sticky='w')
@@ -325,7 +332,7 @@ class Gui(CTk, WinUtils, Logging):
 
 	def confirm(self, question):
 		'Additional Confirmations'
-		question += '\n\n\n'
+		question += '\n\n'
 		question += self.conf['TEXT']['areyoushure']
 		if not askquestion(self.conf['TEXT']['warning_title'], question) == 'yes':
 			return False
@@ -489,9 +496,10 @@ class Gui(CTk, WinUtils, Logging):
 		)
 		if len(self.work_target) > 0:
 			question = self.conf['TEXT']['filewarning']
-			for file in self.work_target:
-				question += f'\n{file}'
+			question += self.list_to_string(self.work_target)
 			if self.confirm(question):
+				self.conf['DEFAULT']['initialdir'] = str(Path(self.work_target[0]).parent)
+				self.decode_settings()
 				self.options['writelog'] = False
 				self.work_files_thread = Thread(target=self.work_files)
 				self.work_files_thread.start()
@@ -506,6 +514,7 @@ class Gui(CTk, WinUtils, Logging):
 		files_of_str = ''
 		qt_files = len(self.work_target)
 		file_cnt = 0
+		errors = list()
 		self.blocksize = None
 		for file in self.work_target:
 			self.head_info.set(file)
@@ -524,10 +533,18 @@ class Gui(CTk, WinUtils, Logging):
 				self.main_info.set(self.conf['TEXT']['deleting_file'])
 				if not self.zerod.dummy:
 					Path(file).unlink()
+			else:
+				errors.append(file)
 		self.head_info.set('')
 		self.main_info.set(self.conf['TEXT']['all_done'])
 		self.progress_info.set('100 %')
 		self.working = False
+		if errors != list():
+			showerror(
+				self.conf['TEXT']['error'],
+				self.conf['TEXT']['errorwhile'] + self.list_to_string(errors)
+			)
+			self.quit_work()
 
 if __name__ == '__main__':  # start here
 	Gui().mainloop()
