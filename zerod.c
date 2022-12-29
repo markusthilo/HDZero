@@ -1,4 +1,4 @@
-/* zerod v0.1-20221228 */
+/* zerod v0.1-20221229 */
 /* written for Windows + MinGW */
 /* Author: Markus Thilo' */
 /* E-mail: markus.thilo@gmail.com */
@@ -40,15 +40,12 @@ HANDLE open_handle(char *path) {
 		FILE_ATTRIBUTE_NORMAL,
 		NULL
 	);
-	if ( fh == INVALID_HANDLE_VALUE ) {
-		fprintf(stderr, "Error: could not open output file %s\n", path);
-		exit(1);
-	}
 	return fh;
 }
 
 /* Close handle */
 void close_handle(HANDLE fh) {
+	if ( fh == INVALID_HANDLE_VALUE ) return;
 	if ( CloseHandle(fh) ) return;
 	fprintf(stderr, "Error: could not close output file or device\n");
 	exit(1);
@@ -150,13 +147,10 @@ int main(int argc, char **argv) {
 		exit(1);
 	}
 	HANDLE fh = open_handle(argv[1]);	// open file or drive
-	if ( fh == INVALID_HANDLE_VALUE ) {
-		fprintf(stderr, "Error: could not open output file %s\n", argv[1]);
-		exit(1);
-	}
 	ULONGLONG towrite = 0;	// bytes to write
 	LARGE_INTEGER li_filesize;	// file size as a crappy win32 file type
-	if ( GetFileSizeEx(fh, &li_filesize) ) towrite = (ULONGLONG)li_filesize.QuadPart;
+	if ( fh != INVALID_HANDLE_VALUE )
+		if ( GetFileSizeEx(fh, &li_filesize) ) towrite = (ULONGLONG)li_filesize.QuadPart;
 	ULONGLONG written = 0;	// to count written bytes
 	DWORD blocksize = 0;	// block size to write
 	BOOL xtrasave = FALSE;	// randomized overwrite
@@ -207,6 +201,10 @@ int main(int argc, char **argv) {
 	}
 	/* End of CLI */
 	if ( dummy ) printf("Dummy mode, nothing will be written to disk\n");
+	else if ( fh == INVALID_HANDLE_VALUE ) {
+		fprintf(stderr, "Error: could not open %s\n", argv[1]);
+		exit(1);
+	}
 	if ( xtrasave ) printf("Pass 1 of 2, writing random bytes\n");
 	else printf("Pass 1 of 1, writing zeros\n");
 	fflush(stdout);	// spent one day finding out that this is needed for windows stdout
@@ -281,6 +279,10 @@ int main(int argc, char **argv) {
 			memset(maxblock, 0, sizeof(maxblock));	// fill array with zeros
 			close_handle(fh);	// close
 			fh = open_handle(argv[1]);	// and open again for second pass
+			if ( fh == INVALID_HANDLE_VALUE ) {
+				fprintf(stderr, "Error: could not re-open %s\n", argv[1]);
+				exit(1);
+			}
 			written = write_blocks(fh, maxblock, towrite, 0, blocksize, ONESEC, bytesof);
 		}
 	}
