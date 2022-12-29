@@ -230,6 +230,10 @@ class Gui(CTk, WinUtils, Logging):
 		### WIPE DRIVE ###
 		self.drive_frame = CTkFrame(self.main_frame)
 		self.drive_frame.pack(padx=self.PAD, pady=self.PAD)
+		head_frame = CTkFrame(self.drive_frame)
+		head_frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
+		CTkLabel(head_frame, text=self.conf['TEXT']['disklabel']).pack(
+			padx=self.PAD, pady=self.PAD, side='left')
 		opt_frame = CTkFrame(self.drive_frame)
 		opt_frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
 		### OPTION FRAME ###
@@ -280,6 +284,7 @@ class Gui(CTk, WinUtils, Logging):
 		self.settings['deletefile'] = BooleanVar(value=self.conf['DEFAULT']['deletefile'])
 		CTkCheckBox(master=frame, text=self.conf['TEXT']['deletefile'], variable=self.settings['deletefile'],
 			onvalue=True, offvalue=False).pack(padx=self.PAD, pady=self.PAD, side='left')
+		CTkLabel(frame, text=self.conf['TEXT']['filelabel']).pack(padx=self.PAD, pady=self.PAD, side='left')
 		### BOTTOM ###
 		frame = CTkFrame(self.main_frame)
 		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
