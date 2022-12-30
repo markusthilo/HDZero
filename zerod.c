@@ -1,4 +1,4 @@
-/* zerod v0.1-20221229 */
+/* zerod v0.1-20221230 */
 /* written for Windows + MinGW */
 /* Author: Markus Thilo' */
 /* E-mail: markus.thilo@gmail.com */
@@ -29,11 +29,25 @@ ULONGLONG read_ulonglong(char *s) {
 	return r;
 }
 
-/* Open handle */
-HANDLE open_handle(char *path) {
+/* Open handle to read */
+HANDLE open_handle_write(char *path) {
 	HANDLE fh = CreateFile(
 		path,
 		GENERIC_WRITE,
+		0,
+		0,
+		OPEN_EXISTING,
+		FILE_ATTRIBUTE_NORMAL,
+		NULL
+	);
+	return fh;
+}
+
+/* Open handle to read */
+HANDLE open_handle_read(char *path) {
+	HANDLE fh = CreateFile(
+		path,
+		GENERIC_READ,
 		0,
 		0,
 		OPEN_EXISTING,
@@ -86,16 +100,18 @@ ULONGLONG write_blocks(
 {
 	BOOL writectrl;
 	DWORD newwritten;
-	ULONGLONG blockstw = towrite - blocksize;
-	clock_t printclock = clock() + clockdelta;
-	while ( written < blockstw ) {	// write blocks
-		writectrl = WriteFile(fh, maxblock, blocksize, &newwritten, NULL);
-		written += newwritten;
-		if ( !writectrl || newwritten < blocksize ) error_stopped(written, fh);
-		if ( clock() >= printclock ) {
-			printf("... %llu%s", written, bytesof);
-			fflush(stdout);
-			printclock += clockdelta;
+	if ( towrite - written > blocksize ) {
+		ULONGLONG tominusblock = towrite - blocksize;
+		clock_t printclock = clock() + clockdelta;
+		while ( written < tominusblock ) {	// write blocks
+			writectrl = WriteFile(fh, maxblock, blocksize, &newwritten, NULL);
+			written += newwritten;
+			if ( !writectrl || newwritten < blocksize ) error_stopped(written, fh);
+			if ( clock() >= printclock ) {
+				printf("... %llu%s", written, bytesof);
+				fflush(stdout);
+				printclock += clockdelta;
+			}
 		}
 	}
 	DWORD wltowrite = towrite - written;
@@ -133,12 +149,16 @@ ULONGLONG dummy_write_blocks(
 /* Main function - program starts here*/
 int main(int argc, char **argv) {
 	// Definitions
+	const ULONGLONG MAX_LARGE_INTEGER = 0x7fffffffffffffff;
 	const clock_t MAXCLOCK = 0x7fffffff;
 	const clock_t ONESEC = 1000000 / CLOCKS_PER_SEC;
 	const DWORD MAXBLOCKSIZE = 0x100000;
 	const DWORD MINBLOCKSIZE = 0x200;
 	const DWORD MAXCOUNTER = 100;
-	const DWORD MINCALCSIZE = MAXBLOCKSIZE * MAXCOUNTER * 48;
+	const ULONGLONG MINCALCSIZE = 0x200000000;
+	const DWORD VERIFYBYTES = 32;
+	const int VERIFYLINES = 20;
+	const ULONGLONG VERIFYBLOCK = ( VERIFYLINES * VERIFYBYTES );
 	const DWORD DUMMYSLEEP = 500;
 	const int DUMMYCNT = 20;
 	/* CLI arguments */
@@ -146,7 +166,7 @@ int main(int argc, char **argv) {
 		fprintf(stderr, "Error: Missing argument(s)\n");
 		exit(1);
 	}
-	HANDLE fh = open_handle(argv[1]);	// open file or drive
+	HANDLE fh = open_handle_write(argv[1]);	// open file or drive
 	ULONGLONG towrite = 0;	// bytes to write
 	LARGE_INTEGER li_filesize;	// file size as a crappy win32 file type
 	if ( fh != INVALID_HANDLE_VALUE )
@@ -203,7 +223,7 @@ int main(int argc, char **argv) {
 	if ( dummy ) printf("Dummy mode, nothing will be written to disk\n");
 	else if ( fh == INVALID_HANDLE_VALUE ) {
 		fprintf(stderr, "Error: could not open %s\n", argv[1]);
-		exit(1);
+		error_close(fh);
 	}
 	if ( xtrasave ) printf("Pass 1 of 2, writing random bytes\n");
 	else printf("Pass 1 of 1, writing zeros\n");
@@ -235,7 +255,7 @@ int main(int argc, char **argv) {
 		}
 	} else {	// the real thing starts here
 		DWORD maxblocksize;	// build block at needed size to write
-		if (blocksize == 0) maxblocksize = MAXBLOCKSIZE;
+		if ( blocksize == 0 ) maxblocksize = MAXBLOCKSIZE;
 		else maxblocksize = blocksize;
 		char maxblock[maxblocksize];
 		if ( xtrasave ) for (int i=0; i<maxblocksize; i++) maxblock[i] = (char)rand();
@@ -278,7 +298,7 @@ int main(int argc, char **argv) {
 			fflush(stdout);
 			memset(maxblock, 0, sizeof(maxblock));	// fill array with zeros
 			close_handle(fh);	// close
-			fh = open_handle(argv[1]);	// and open again for second pass
+			fh = open_handle_write(argv[1]);	// and open again for second pass
 			if ( fh == INVALID_HANDLE_VALUE ) {
 				fprintf(stderr, "Error: could not re-open %s\n", argv[1]);
 				exit(1);
@@ -286,7 +306,76 @@ int main(int argc, char **argv) {
 			written = write_blocks(fh, maxblock, towrite, 0, blocksize, ONESEC, bytesof);
 		}
 	}
-	printf("All done, %llu bytes were zeroed by writing blocks of %lu bytes\n", written, blocksize);
 	close_handle(fh);
+	/* Verify */
+	printf("Verifying %s\n", argv[1]);
+	fflush(stdout);
+	fh = open_handle_read(argv[1]);	// open file or drive to verify
+	if ( fh == INVALID_HANDLE_VALUE ) {
+		if ( !dummy ) {
+			fprintf(stderr, "Error: could not open %s to verify\n", argv[1]);
+			error_close(fh);
+		}
+		printf("Bytes 0 - %llu:\n", written);
+		fflush(stdout);
+		for (int i=0; i<VERIFYLINES; i++) {
+			printf("TH IS IS A_ DU MM Y_ OU TP UT 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n");
+			fflush(stdout);
+		}
+	} else {
+		ULONGLONG position = 0;	// position of vierified bytes
+		ULONGLONG blockend, newposition;
+		char readbuffer[VERIFYBYTES];
+		char check;
+		DWORD read_bytes;
+		DWORD toread = VERIFYBYTES;
+		LARGE_INTEGER moveto;
+		while ( position < written ) {
+			blockend = position + VERIFYBLOCK;
+			if ( blockend > written ) blockend = written;
+			printf("Bytes %llu - %llu:\n", position, blockend);
+			fflush(stdout);
+			while ( position < blockend ) {
+				if ( position + toread > written ) toread = written - toread;
+				if ( !ReadFile(fh,
+					readbuffer,
+					toread,
+					&read_bytes,
+					NULL
+				) ) error_stopped(position+read_bytes, fh);
+				position += read_bytes;
+				check = 0;
+				for (int i=0; i<toread; i++) {
+					printf("%02X ", readbuffer[i]);
+					check = check | readbuffer[i];
+				}
+				printf("\n");
+				fflush(stdout);
+				if ( check != 0 & !dummy ) {
+					fprintf(stderr, "Error: found byte(s) not zero\n");
+					error_close(fh);
+				}
+			}
+			if ( position >= written ) break;
+			blockend = ( written + VERIFYBLOCK ) >> 1;
+			newposition = blockend - VERIFYBLOCK;
+			if ( position > newposition ) position = written - VERIFYBLOCK;
+			else position = newposition;
+			if ( position > MAX_LARGE_INTEGER ) break;	// might be an unnecessary precaution
+			moveto.QuadPart = position;	// win still is not a real 64 bit system...
+			if ( !SetFilePointerEx(	// jump to position
+				fh,
+				moveto,
+				NULL,
+				FILE_BEGIN
+			) ) {
+				fprintf(stderr, "Error: could not go to position %lld in read %s\n",
+					moveto.QuadPart, argv[1]);
+				error_close(fh);
+			}
+		}
+	}
+	close_handle(fh);
+	printf("All done, %llu bytes were zeroed by writing blocks of %lu bytes\n", written, blocksize);
 	exit(0);
 }

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 __author__ = 'Markus Thilo'
-__version__ = '0.1_2022-12-29'
+__version__ = '0.1_2022-12-30'
 __license__ = 'GPL-3'
 __email__ = 'markus.thilo@gmail.com'
 __status__ = 'Under Construction'
@@ -410,6 +410,7 @@ class Gui(CTk, WinUtils, Logging):
 		bytes_str = self.conf['TEXT']['bytes']
 		testing_blocksize_str = self.conf['TEXT']['testing_blocksize']
 		using_blocksize_str = self.conf['TEXT']['using_blocksize']
+		verifying_str = self.conf['TEXT']['verifying']
 		pass_of_str = ''
 		debug = self.conf['DEBUG']['print']
 		for msg_raw in self.zerod_proc.stdout:
@@ -431,6 +432,9 @@ class Gui(CTk, WinUtils, Logging):
 			elif msg_split[0] == 'Using':
 				self.blocksize = msg_split[3]
 				self.main_info.set(f'{using_blocksize_str} {self.blocksize} {bytes_str}')
+			elif msg_split[0] == 'Verifying':
+				info = f'{verifying_str} {msg_split[1]}'
+				self.main_info.set(info)
 			else:
 				info = msg
 				self.main_info.set(msg)
