@@ -1,4 +1,4 @@
-/* zerod v0.1-20221230 */
+/* zerod v0.1-20221231 */
 /* written for Windows + MinGW */
 /* Author: Markus Thilo' */
 /* E-mail: markus.thilo@gmail.com */
@@ -13,7 +13,7 @@
 ULONGLONG read_ulonglong(char *s) {
 	int l = 0;
 	while (1) {
-		if (s[l] == 0) break;
+		if ( s[l] == 0 ) break;
 		if ( s[l] < '0' || s[l] > '9' ) return 0;
 		l++;
 	}
@@ -21,8 +21,8 @@ ULONGLONG read_ulonglong(char *s) {
 	ULONGLONG r = 0;
 	ULONGLONG n;
 	for (int i=l-1; i>=0; i--){
-		n = r + (f * (s[i]-'0'));
-		if (n < r) return 0;
+		n = r + ( f * (s[i]-'0') );
+		if ( n < r ) return 0;
 		r = n;
 		f *= 10;
 	}
@@ -318,8 +318,15 @@ int main(int argc, char **argv) {
 		}
 		printf("Bytes 0 - %llu:\n", written);
 		fflush(stdout);
-		for (int i=0; i<VERIFYLINES; i++) {
-			printf("TH IS IS A_ DU MM Y_ OU TP UT 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\n");
+		char *msg = "00000000DUMMY000MODE";
+		int pos = 0;
+		for (int l=0; l<VERIFYLINES; l++) {
+			for (int b=0; b<VERIFYBYTES; b++) {
+				printf("%c%c ", msg[pos], msg[pos+1]);
+				if ( msg[pos+1] == 0 || msg[pos+2] == 0 ) pos = 0;
+				else pos += 2;
+			}
+			printf("\n");
 			fflush(stdout);
 		}
 	} else {
