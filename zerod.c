@@ -1,4 +1,4 @@
-/* zerod v0.1-20221231 */
+/* zerod v0.1-20230102 */
 /* written for Windows + MinGW */
 /* Author: Markus Thilo' */
 /* E-mail: markus.thilo@gmail.com */
@@ -9,19 +9,45 @@
 #include <time.h>
 #include <windows.h>
 
+#include <winioctl.h>
+
+// Definitions
+const ULONGLONG MAX_LARGE_INTEGER = 0x7fffffffffffffff;
+const clock_t MAXCLOCK = 0x7fffffff;
+const clock_t ONESEC = 1000000 / CLOCKS_PER_SEC;
+const DWORD MAXBLOCKSIZE = 0x100000;
+const DWORD MINBLOCKSIZE = 0x200;
+const DWORD MAXCOUNTER = 0x10;
+const ULONGLONG MINCALCSIZE = 0x100000000;
+const int VERIFYPRINTLENGTH = 32;
+const DWORD DUMMYSLEEP = 250;
+const int DUMMYCNT = 10;
+
+/* Print error to stderr and exit */
+void error_toomany() {
+	fprintf(stderr, "Error: too many arguments\n");
+	exit(1);
+}
+
+/* Print error to stderr and exit */
+void error_wrong(char *arg) {
+	fprintf(stderr, "Error: wrong argument %s\n", arg);
+	exit(1);
+}
+
 /* Convert string to unsigned long long */
-ULONGLONG read_ulonglong(char *s) {
-	int l = 0;
-	while (1) {
-		if ( s[l] == 0 ) break;
-		if ( s[l] < '0' || s[l] > '9' ) return 0;
-		l++;
+DWORD read_blocksize(char *s) {
+	int p = 0;
+	while ( TRUE ) {
+		if ( s[p] == 0 ) break;
+		if ( s[p] < '0' || s[p] > '9' ) return 0;
+		p++;
 	}
-	ULONGLONG f = 1;
-	ULONGLONG r = 0;
-	ULONGLONG n;
-	for (int i=l-1; i>=0; i--){
-		n = r + ( f * (s[i]-'0') );
+	DWORD f = 1;
+	DWORD r = 0;
+	DWORD n;
+	while ( --p >= 0 ) {
+		n = r + ( f * (s[p]-'0') );
 		if ( n < r ) return 0;
 		r = n;
 		f *= 10;
@@ -34,26 +60,16 @@ HANDLE open_handle_write(char *path) {
 	HANDLE fh = CreateFile(
 		path,
 		GENERIC_WRITE,
-		0,
-		0,
+		FILE_SHARE_READ | FILE_SHARE_WRITE,
+		NULL,
 		OPEN_EXISTING,
-		FILE_ATTRIBUTE_NORMAL,
+		0,
 		NULL
 	);
-	return fh;
-}
-
-/* Open handle to read */
-HANDLE open_handle_read(char *path) {
-	HANDLE fh = CreateFile(
-		path,
-		GENERIC_READ,
-		0,
-		0,
-		OPEN_EXISTING,
-		FILE_ATTRIBUTE_NORMAL,
-		NULL
-	);
+	if ( fh == INVALID_HANDLE_VALUE ) {
+		fprintf(stderr, "Error: could not open output file or device %s to write\n", path);
+		exit(1);
+	}
 	return fh;
 }
 
@@ -71,10 +87,44 @@ void error_close(HANDLE fh) {
 	exit(1);
 }
 
-/* Print error to stderr and exit */
-void error_toomany(HANDLE fh) {
-	fprintf(stderr, "Error: too many arguments\n");
-	error_close(fh);
+/* Get size */
+ULONGLONG get_size(HANDLE fh) {
+	ULONGLONG size;
+	DISK_GEOMETRY pdg;	// disk?
+	if ( DeviceIoControl(
+		fh,
+		IOCTL_DISK_GET_DRIVE_GEOMETRY,
+		NULL,
+		0,
+		&pdg,
+		sizeof(pdg),
+        NULL,
+		NULL
+	) ) size = pdg.Cylinders.QuadPart * (ULONG)pdg.TracksPerCylinder *
+			(ULONG)pdg.SectorsPerTrack * (ULONG)pdg.BytesPerSector;
+	else {	// file?
+		LARGE_INTEGER li_filesize;	// file size as a crappy win32 file type
+		if ( !GetFileSizeEx(fh, &li_filesize) ) {
+			fprintf(stderr, "Error: could not determin a file or disk to wipe\n");
+			error_close(fh);
+		}
+		size = (ULONGLONG)li_filesize.QuadPart;
+	}
+	return size;
+}
+
+/* Open handle to read */
+HANDLE open_handle_read(char *path) {
+	HANDLE fh = CreateFile(
+		path,
+		GENERIC_READ,
+		FILE_SHARE_READ,
+		NULL,
+		OPEN_EXISTING,
+		0,
+		NULL
+	);
+	return fh;
 }
 
 void error_blocksize(HANDLE fh) {
@@ -82,35 +132,57 @@ void error_blocksize(HANDLE fh) {
 	error_close(fh);
 }
 
-void error_stopped(ULONGLONG written, HANDLE fh) {
-	fprintf(stderr, "Error: stopped after %llu bytes\n", written);
+void error_stopped(ULONGLONG position, HANDLE fh) {
+	fprintf(stderr, "Error: stopped after %llu bytes\n", position);
 	error_close(fh);
+}
+
+void error_notzero(ULONGLONG position, HANDLE fh) {
+	fprintf(stderr, "Error: found bytes that are not zero at or beyond %llu\n", position);
+	error_close(fh);
+}
+
+/* Set file pointer */
+void set_pointer(HANDLE fh, ULONGLONG position) {
+	if ( position > MAX_LARGE_INTEGER ) {	// might be an unnecessary precaution
+		fprintf(stderr, "Error: position %lld is out of range\n", position);
+		error_close(fh);
+	}
+	LARGE_INTEGER moveto;	// win still is not a real 64 bit system...
+	moveto.QuadPart = position;
+	if ( !SetFilePointerEx(	// jump to position
+		fh,
+		moveto,
+		NULL,
+		FILE_BEGIN
+	) ) {
+		fprintf(stderr, "Error: could not point to position %lld\n", moveto.QuadPart);
+		error_close(fh);
+	}
 }
 
 /* Write bytes to file by given block size */
 ULONGLONG write_blocks(
 	HANDLE fh,
-	char *maxblock,
+	BYTE *maxblock,
 	ULONGLONG towrite,
 	ULONGLONG written,
 	DWORD blocksize,
-	clock_t clockdelta,
 	char *bytesof
-	)
-{
+) {
 	BOOL writectrl;
 	DWORD newwritten;
 	if ( towrite - written > blocksize ) {
 		ULONGLONG tominusblock = towrite - blocksize;
-		clock_t printclock = clock() + clockdelta;
+		clock_t printclock = clock() + ONESEC;
 		while ( written < tominusblock ) {	// write blocks
-			writectrl = WriteFile(fh, maxblock, blocksize, &newwritten, NULL);
+			if ( !WriteFile(fh, maxblock, blocksize, &newwritten, NULL)
+				|| newwritten < blocksize ) error_stopped(written+newwritten, fh);
 			written += newwritten;
-			if ( !writectrl || newwritten < blocksize ) error_stopped(written, fh);
 			if ( clock() >= printclock ) {
 				printf("... %llu%s", written, bytesof);
 				fflush(stdout);
-				printclock += clockdelta;
+				printclock += ONESEC;
 			}
 		}
 	}
@@ -121,6 +193,108 @@ ULONGLONG write_blocks(
 	printf("... %llu%s", written, bytesof);
 	fflush(stdout);
 	return written;
+}
+
+/* Verify bytes by given block size */
+ULONGLONG verify_blocks(
+	HANDLE fh,
+	ULONGLONG written,
+	ULONGLONG position,
+	DWORD blocksize,
+	char *bytesof
+) {
+	DWORD ullperblock = blocksize >> 3;	// ull in one block = blocksize / 8
+	ULONGLONG ullblock[ullperblock];
+	ULONGLONG tominusblock;
+	DWORD newread;
+	if ( written - position >= blocksize ) {
+		tominusblock = written - blocksize;
+		clock_t printclock = clock() + ONESEC;
+		while ( position < tominusblock ) {
+			if ( !ReadFile(fh,
+				ullblock,
+				blocksize,
+				&newread,
+				NULL
+			) || newread != blocksize ) error_stopped(position+newread, fh);
+			for (DWORD p=0; p<ullperblock; p++) if ( ullblock[p] != 0 )
+				error_notzero(position + (p<<3), fh);
+			position += blocksize;
+			if ( clock() >= printclock ) {
+				printf("... %llu%s", position, bytesof);
+				fflush(stdout);
+				printclock += ONESEC;
+			}
+		}
+	}
+	if ( written - position >= MINBLOCKSIZE ) {
+		tominusblock = written - MINBLOCKSIZE;
+		ullperblock = MINBLOCKSIZE / 8;
+		while ( position < tominusblock ) {
+			if ( !ReadFile(fh,
+				ullblock,
+				MINBLOCKSIZE,
+				&newread,
+				NULL
+			) || newread != MINBLOCKSIZE ) error_stopped(position+newread, fh);
+			for (DWORD p=0; p<ullperblock; p++) if ( ullblock[p] != 0 )
+				error_notzero(position + (p<<3), fh);
+			position += MINBLOCKSIZE;
+		}
+	}
+	if ( position < written ) {
+		DWORD bytesleft = (DWORD)(written - position);
+		BYTE byteblock[bytesleft];
+		if ( !ReadFile(fh,
+			byteblock,
+			bytesleft,
+			&newread,
+			NULL
+		) || newread != bytesleft ) error_stopped(position, fh);
+		for (DWORD p=0; p<bytesleft; p++) if ( byteblock[p] != 0 ) error_notzero(position, fh);
+		position += bytesleft;
+	}
+	printf("... %llu%s", position, bytesof);
+	fflush(stdout);
+	return position;
+}
+
+/* Verify bytes by given block size */
+ULONGLONG print_block(HANDLE fh, ULONGLONG written, ULONGLONG position) {
+	set_pointer(fh, position);
+	BYTE charblock[MINBLOCKSIZE];
+	DWORD newread;
+	if ( written - position >= MINBLOCKSIZE ) {
+		if ( !ReadFile(fh,
+			charblock,
+			MINBLOCKSIZE,
+			&newread,
+			NULL
+		) || newread != MINBLOCKSIZE ) error_stopped(position+newread, fh);
+	} else {
+		if ( !ReadFile(fh,
+			charblock,
+			(DWORD)(written - position),
+			&newread,
+			NULL
+		) || newread != MINBLOCKSIZE ) error_stopped(position+newread, fh);
+	}
+	printf("Bytes %llu - %llu:", position, position+newread);
+	int t = 1;
+	BYTE check;
+	for (DWORD p=0; p<newread; p++) {
+		if ( --t == 0 ) {
+			printf("\n");
+			t = VERIFYPRINTLENGTH;
+		}
+		printf("%02X ", charblock[p]);
+
+		check = check | charblock[p];
+	}
+	printf("\n");
+	fflush(stdout);
+	if ( check != 0 ) error_notzero(position, fh);
+	return position;
 }
 
 /* Pretend to Write */
@@ -148,90 +322,53 @@ ULONGLONG dummy_write_blocks(
 
 /* Main function - program starts here*/
 int main(int argc, char **argv) {
-	// Definitions
-	const ULONGLONG MAX_LARGE_INTEGER = 0x7fffffffffffffff;
-	const clock_t MAXCLOCK = 0x7fffffff;
-	const clock_t ONESEC = 1000000 / CLOCKS_PER_SEC;
-	const DWORD MAXBLOCKSIZE = 0x100000;
-	const DWORD MINBLOCKSIZE = 0x200;
-	const DWORD MAXCOUNTER = 100;
-	const ULONGLONG MINCALCSIZE = 0x200000000;
-	const DWORD VERIFYBYTES = 32;
-	const int VERIFYLINES = 20;
-	const ULONGLONG VERIFYBLOCK = ( VERIFYLINES * VERIFYBYTES );
-	const DWORD DUMMYSLEEP = 500;
-	const int DUMMYCNT = 20;
 	/* CLI arguments */
 	if ( argc < 2 ) {
 		fprintf(stderr, "Error: Missing argument(s)\n");
 		exit(1);
 	}
-	HANDLE fh = open_handle_write(argv[1]);	// open file or drive
-	ULONGLONG towrite = 0;	// bytes to write
-	LARGE_INTEGER li_filesize;	// file size as a crappy win32 file type
-	if ( fh != INVALID_HANDLE_VALUE )
-		if ( GetFileSizeEx(fh, &li_filesize) ) towrite = (ULONGLONG)li_filesize.QuadPart;
-	ULONGLONG written = 0;	// to count written bytes
 	DWORD blocksize = 0;	// block size to write
 	BOOL xtrasave = FALSE;	// randomized overwrite
+	BOOL full_verify = FALSE; // to verify every byte
 	BOOL dummy = FALSE;	// dummy mode
-	ULONGLONG argull[2];	// size arguments
+	DWORD arg_blocksize = 0; // block size 0 = not set
 	int argullcnt = 0;
 	for (int i=2; i<argc; i++) {	// if there are more arguments
 		if ( ( argv[i][0] == '/' && argv[i][2] == 0 )	// x for two pass mode
 			&& ( argv[i][1] == 'x' || argv[i][1] == 'X' ) 
 		) {
-			if ( xtrasave ) error_toomany(fh);
+			if ( xtrasave ) error_toomany();
 			xtrasave = TRUE;
+		} else if ( ( argv[i][0] == '/' && argv[i][2] == 0 )
+			&& ( argv[i][1] == 'v' || argv[i][1] == 'V' )	// v for full verify
+		) {
+			if ( full_verify ) error_toomany();
+			full_verify = TRUE;
 		} else if ( ( argv[i][0] == '/' && argv[i][2] == 0 )
 			&& ( argv[i][1] == 'd' || argv[i][1] == 'D' )	// d for dummy mode
 		) {
-			if ( dummy ) error_toomany(fh);
+			if ( dummy ) error_toomany();
 			dummy = TRUE;
 		} else {
-			argull[argullcnt] = read_ulonglong(argv[i]);
-			if ( argull[argullcnt] > 0 ) {	// argument is size in bytes
-				if ( argullcnt++ > 1 ) error_toomany(fh);
-			} else {
-				fprintf(stderr, "Error: wrong argument\n");
-				error_close(fh);
-			}
+			arg_blocksize = read_blocksize(argv[i]);
+			if ( arg_blocksize > 0 ) {
+				if ( blocksize > 0 ) error_toomany();
+				blocksize = arg_blocksize;
+			} else error_wrong(argv[i]);
 		}
-	}
-	if ( argullcnt == 1 ) {	// size arguments
-		if ( towrite > 0 ) {
-			if ( argull[0] > MAXBLOCKSIZE ) error_blocksize(fh);
-			blocksize = argull[0];
-		} else towrite = argull[0];
-	} else if ( argullcnt == 2 ) {
-		if ( towrite > 0 ) error_toomany(fh);
-		if ( argull[0] >= argull[1] ) {
-			if ( argull[1] > MAXBLOCKSIZE ) error_blocksize(fh);
-			towrite = argull[0];
-			blocksize = (DWORD)argull[1];
-		} else {
-			if ( argull[0] > MAXBLOCKSIZE ) error_blocksize(fh);
-			blocksize = (DWORD)argull[0];
-			towrite = argull[1];
-		}
-	}
-	if ( towrite == 0 ) {
-		fprintf(stderr, "Error: could not determin number of bytes to write\n");
-		error_close(fh);
 	}
 	/* End of CLI */
+	HANDLE fh = open_handle_write(argv[1]);	// open file or drive
+	ULONGLONG towrite = get_size(fh);	// get size of disk or file
+	ULONGLONG written = 0;	// to count written bytes
 	if ( dummy ) printf("Dummy mode, nothing will be written to disk\n");
-	else if ( fh == INVALID_HANDLE_VALUE ) {
-		fprintf(stderr, "Error: could not open %s\n", argv[1]);
-		error_close(fh);
-	}
 	if ( xtrasave ) printf("Pass 1 of 2, writing random bytes\n");
 	else printf("Pass 1 of 1, writing zeros\n");
 	fflush(stdout);	// spent one day finding out that this is needed for windows stdout
 	char *bytesof = (char*)malloc(32 * sizeof(char));	//  to print written bytes
 	sprintf(bytesof, " of %llu bytes\n", towrite);
 	if ( dummy ) {	// dummy mode
-		if ( towrite > MINCALCSIZE && blocksize == 0 ) {
+		if ( towrite >= MINCALCSIZE && blocksize == 0 ) {
 			printf("Calculating best block size\n");
 			fflush(stdout);
 			blocksize = MAXBLOCKSIZE;
@@ -254,16 +391,13 @@ int main(int argc, char **argv) {
 			written = dummy_write_blocks(DUMMYCNT, DUMMYSLEEP, towrite, 0, blocksize, bytesof);
 		}
 	} else {	// the real thing starts here
-		DWORD maxblocksize;	// build block at needed size to write
-		if ( blocksize == 0 ) maxblocksize = MAXBLOCKSIZE;
-		else maxblocksize = blocksize;
-		char maxblock[maxblocksize];
+		DWORD maxblocksize = MAXBLOCKSIZE;
+		if ( blocksize > 0 ) maxblocksize = blocksize; 
+		BYTE maxblock[maxblocksize];	// generate block to write
 		if ( xtrasave ) for (int i=0; i<maxblocksize; i++) maxblock[i] = (char)rand();
-		else memset(maxblock, 0, sizeof(maxblock));
-		BOOL writectrl;
-		DWORD newwritten;
-		/* Calculate best/fastes block size */
-		if ( towrite > MINCALCSIZE && blocksize == 0 ) {
+		else memset(maxblock, 0, maxblocksize);
+		if ( blocksize == 0 && towrite >= MINCALCSIZE ) {	// calculate best/fastes block size
+			DWORD newwritten;
 			printf("Calculating best block size\n");
 			fflush(stdout);
 			clock_t bestduration = MAXCLOCK;
@@ -274,9 +408,9 @@ int main(int argc, char **argv) {
 				printf("Testing block size %lu bytes\n", size);
 				clock_t start = clock();
 				for (DWORD blockcnt=0; blockcnt<blockstw; blockcnt++) {
-					writectrl = WriteFile(fh, maxblock, size, &newwritten, NULL);
+					if ( !WriteFile(fh, maxblock, size, &newwritten, NULL)
+						|| newwritten < size ) error_stopped(written+newwritten, fh);
 					written += newwritten;
-					if ( !writectrl || newwritten < size ) error_stopped(written, fh);
 				}
 				duration = clock() - start;	// duration of writeprocess
 				printf("... %llu%s", written, bytesof);
@@ -287,11 +421,11 @@ int main(int argc, char **argv) {
 				}
 				size = size >> 1;	// devide block by 2
 			}
-			printf("Using block size of %lu bytes\n", blocksize);
-			fflush(stdout);
-		} else if ( blocksize == 0 ) blocksize = maxblocksize;
+		}  else if ( blocksize == 0 ) blocksize = MAXBLOCKSIZE;
+		printf("Using block size of %lu bytes\n", blocksize);
+		fflush(stdout);
 		/* First pass */
-		written = write_blocks(fh, maxblock, towrite, written, blocksize, ONESEC, bytesof);
+		written = write_blocks(fh, maxblock, towrite, written, blocksize, bytesof);
 		/* Second passs */
 		if ( xtrasave ) {
 			printf("Pass 2 of 2, writing zeros\n");
@@ -303,7 +437,7 @@ int main(int argc, char **argv) {
 				fprintf(stderr, "Error: could not re-open %s\n", argv[1]);
 				exit(1);
 			}
-			written = write_blocks(fh, maxblock, towrite, 0, blocksize, ONESEC, bytesof);
+			written = write_blocks(fh, maxblock, towrite, 0, blocksize, bytesof);
 		}
 	}
 	close_handle(fh);
@@ -312,77 +446,19 @@ int main(int argc, char **argv) {
 	fflush(stdout);
 	fh = open_handle_read(argv[1]);	// open file or drive to verify
 	if ( fh == INVALID_HANDLE_VALUE ) {
-		if ( !dummy ) {
-			fprintf(stderr, "Error: could not open %s to verify\n", argv[1]);
-			error_close(fh);
-		}
-		printf("Bytes 0 - %llu:\n", written);
-		fflush(stdout);
-		char *msg = "00000000DUMMY000MODE";
-		int pos = 0;
-		for (int l=0; l<VERIFYLINES; l++) {
-			for (int b=0; b<VERIFYBYTES; b++) {
-				printf("%c%c ", msg[pos], msg[pos+1]);
-				if ( msg[pos+1] == 0 || msg[pos+2] == 0 ) pos = 0;
-				else pos += 2;
-			}
-			printf("\n");
-			fflush(stdout);
-		}
-	} else {
-		ULONGLONG position = 0;	// position of vierified bytes
-		ULONGLONG blockend, newposition;
-		char readbuffer[VERIFYBYTES];
-		char check;
-		DWORD read_bytes;
-		DWORD toread = VERIFYBYTES;
-		LARGE_INTEGER moveto;
-		while ( position < written ) {
-			blockend = position + VERIFYBLOCK;
-			if ( blockend > written ) blockend = written;
-			printf("Bytes %llu - %llu:\n", position, blockend);
-			fflush(stdout);
-			while ( position < blockend ) {
-				if ( position + toread > written ) toread = written - toread;
-				if ( !ReadFile(fh,
-					readbuffer,
-					toread,
-					&read_bytes,
-					NULL
-				) ) error_stopped(position+read_bytes, fh);
-				position += read_bytes;
-				check = 0;
-				for (int i=0; i<toread; i++) {
-					printf("%02X ", readbuffer[i]);
-					check = check | readbuffer[i];
-				}
-				printf("\n");
-				fflush(stdout);
-				if ( check != 0 & !dummy ) {
-					fprintf(stderr, "Error: found byte(s) not zero\n");
-					error_close(fh);
-				}
-			}
-			if ( position >= written ) break;
-			blockend = ( written + VERIFYBLOCK ) >> 1;
-			newposition = blockend - VERIFYBLOCK;
-			if ( position > newposition ) position = written - VERIFYBLOCK;
-			else position = newposition;
-			if ( position > MAX_LARGE_INTEGER ) break;	// might be an unnecessary precaution
-			moveto.QuadPart = position;	// win still is not a real 64 bit system...
-			if ( !SetFilePointerEx(	// jump to position
-				fh,
-				moveto,
-				NULL,
-				FILE_BEGIN
-			) ) {
-				fprintf(stderr, "Error: could not go to position %lld in read %s\n",
-					moveto.QuadPart, argv[1]);
-				error_close(fh);
-			}
-		}
+		fprintf(stderr, "Error: could not open %s to verify\n", argv[1]);
+		error_close(fh);
 	}
+	if ( full_verify ) {	// full verify checks every byte
+		ULONGLONG verified = verify_blocks(fh, written, 0, blocksize, bytesof);
+		printf("Veriefied %llu bytes\n", verified);
+	}
+	ULONGLONG position = print_block(fh, written, 0);	// print first block
+	ULONGLONG halfblocks = written / ( MINBLOCKSIZE << 1 );
+	if ( halfblocks > 4 ) position = print_block(fh, written, halfblocks*MINBLOCKSIZE);
+	if ( position + MINBLOCKSIZE <= written ) print_block(fh, written, written-MINBLOCKSIZE);
+	else if ( position < written ) print_block(fh, written, position);
 	close_handle(fh);
-	printf("All done, %llu bytes were zeroed by writing blocks of %lu bytes\n", written, blocksize);
+	printf("All done, %llu bytes were zeroed\n", written);
 	exit(0);
 }

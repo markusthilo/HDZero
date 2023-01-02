@@ -7,12 +7,17 @@ __email__ = 'markus.thilo@gmail.com'
 
 import PyInstaller.__main__
 from pathlib import Path
+from subprocess import run
 from shutil import copy, rmtree
 
 __parent__ = Path(__file__).parent
 __hdzero__ = __parent__/'dist\\hdzero'
 __ctk__ = __parent__.parent.parent/'AppData\Local\Programs\Python\Python311\Lib\site-packages\customtkinter'
-rmtree('dist')
+try:
+	rmtree('dist')
+except FileNotFoundError:
+	pass
+run(['gcc', '-o', 'zerod.exe', 'zerod.c'])
 PyInstaller.__main__.run([
     'hdzero.py',
     '--onedir',
@@ -23,3 +28,4 @@ PyInstaller.__main__.run([
 for srcfile in 'zerod.exe', 'icon.png', 'hdzero.conf', 'logheader.txt':
 	copy(srcfile, __hdzero__/srcfile)
 rmtree('build')
+Path('hdzero.spec').unlink()

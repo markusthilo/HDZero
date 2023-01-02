@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 __author__ = 'Markus Thilo'
-__version__ = '0.1_2022-12-31'
+__version__ = '0.1_2023-01-02'
 __license__ = 'GPL-3'
 __email__ = 'markus.thilo@gmail.com'
 __status__ = 'Under Construction'
@@ -49,7 +49,10 @@ class WinUtils:
 	def __init__(self, parentpath, dummy=False):
 		'Generate Windows tools'
 		self.conn = WMI()
-		self.dummy_mode = dummy.lower() in 'true', 'yes', 'enabled'
+		if dummy == True or dummy.lower() in ('true', 'yes', 'enabled'):
+			self.dummy_mode = True
+		else:
+			self.dummy_mode = False
 		self.cmd_startupinfo = STARTUPINFO()
 		self.cmd_startupinfo.dwFlags |= STARTF_USESHOWWINDOW
 		self.tmpscriptpath = parentpath/f'_diskpart_script_{GetCurrentProcessId()}.tmp'
@@ -136,8 +139,7 @@ assign letter={letter}
 			)
 		if self.dummy_mode:
 			return letter + ':'
-		proc = self.cmd(['diskpart', '/s', self.tmpscriptpath])
-		self.tmpscriptpath.unlink()
+		proc = self.cmd_launch(['diskpart', '/s', self.tmpscriptpath])
 		if proc.wait() == 0:
 			res = letter + ':'
 		else:
