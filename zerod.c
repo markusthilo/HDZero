@@ -1,4 +1,4 @@
-/* zerod v0.1-20230102 */
+/* zerod v0.1-20230103 */
 /* written for Windows + MinGW */
 /* Author: Markus Thilo' */
 /* E-mail: markus.thilo@gmail.com */
@@ -8,7 +8,6 @@
 #include <stdio.h>
 #include <time.h>
 #include <windows.h>
-
 #include <winioctl.h>
 
 // Definitions
@@ -16,7 +15,7 @@ const ULONGLONG MAX_LARGE_INTEGER = 0x7fffffffffffffff;
 const clock_t MAXCLOCK = 0x7fffffff;
 const clock_t ONESEC = 1000000 / CLOCKS_PER_SEC;
 const DWORD MAXBLOCKSIZE = 0x100000;
-const DWORD MINBLOCKSIZE = 0x200;
+const DWORD MINBLOCKSIZE = 0x200;	// 512 bytes = 1 sector
 const DWORD MAXCOUNTER = 0x10;
 const ULONGLONG MINCALCSIZE = 0x100000000;
 const int VERIFYPRINTLENGTH = 32;
@@ -35,12 +34,12 @@ void error_wrong(char *arg) {
 	exit(1);
 }
 
-/* Convert string to unsigned long long */
+/* Convert string to DWORD for block size as cli argument */
 DWORD read_blocksize(char *s) {
 	int p = 0;
 	while ( TRUE ) {
 		if ( s[p] == 0 ) break;
-		if ( s[p] < '0' || s[p] > '9' ) return 0;
+		if ( s[p] < '0' || s[p] > '9' ) return 0;	// return 0 if not a number
 		p++;
 	}
 	DWORD f = 1;
@@ -48,7 +47,7 @@ DWORD read_blocksize(char *s) {
 	DWORD n;
 	while ( --p >= 0 ) {
 		n = r + ( f * (s[p]-'0') );
-		if ( n < r ) return 0;
+		if ( n < r ) return 0;	// in case given size is too large
 		r = n;
 		f *= 10;
 	}
@@ -172,7 +171,7 @@ ULONGLONG write_blocks(
 ) {
 	BOOL writectrl;
 	DWORD newwritten;
-	if ( towrite - written > blocksize ) {
+	if ( towrite - written > blocksize ) {	// write blocks
 		ULONGLONG tominusblock = towrite - blocksize;
 		clock_t printclock = clock() + ONESEC;
 		while ( written < tominusblock ) {	// write blocks
@@ -182,11 +181,11 @@ ULONGLONG write_blocks(
 			if ( clock() >= printclock ) {
 				printf("... %llu%s", written, bytesof);
 				fflush(stdout);
-				printclock += ONESEC;
+				printclock = clock() + ONESEC;
 			}
 		}
 	}
-	DWORD wltowrite = towrite - written;
+	DWORD wltowrite = towrite - written;	// last block
 	writectrl = WriteFile(fh, maxblock, wltowrite, &newwritten, NULL);	// write what's left
 	written += newwritten;
 	if ( !writectrl || newwritten < wltowrite ) error_stopped(written, fh);
@@ -207,7 +206,7 @@ ULONGLONG verify_blocks(
 	ULONGLONG ullblock[ullperblock];
 	ULONGLONG tominusblock;
 	DWORD newread;
-	if ( written - position >= blocksize ) {
+	if ( written - position >= blocksize ) {	// verify blocks
 		tominusblock = written - blocksize;
 		clock_t printclock = clock() + ONESEC;
 		while ( position < tominusblock ) {
@@ -223,13 +222,13 @@ ULONGLONG verify_blocks(
 			if ( clock() >= printclock ) {
 				printf("... %llu%s", position, bytesof);
 				fflush(stdout);
-				printclock += ONESEC;
+				printclock = clock() + ONESEC;
 			}
 		}
 	}
-	if ( written - position >= MINBLOCKSIZE ) {
+	if ( written - position >= MINBLOCKSIZE ) {	// verify minimal block that is left
 		tominusblock = written - MINBLOCKSIZE;
-		ullperblock = MINBLOCKSIZE / 8;
+		ullperblock = MINBLOCKSIZE >> 3;
 		while ( position < tominusblock ) {
 			if ( !ReadFile(fh,
 				ullblock,
@@ -242,7 +241,7 @@ ULONGLONG verify_blocks(
 			position += MINBLOCKSIZE;
 		}
 	}
-	if ( position < written ) {
+	if ( position < written ) {	// verify less than minimal block - only for files, not disks
 		DWORD bytesleft = (DWORD)(written - position);
 		BYTE byteblock[bytesleft];
 		if ( !ReadFile(fh,
@@ -259,7 +258,7 @@ ULONGLONG verify_blocks(
 	return position;
 }
 
-/* Verify bytes by given block size */
+/* Print block to stdout */
 ULONGLONG print_block(HANDLE fh, ULONGLONG written, ULONGLONG position) {
 	set_pointer(fh, position);
 	BYTE charblock[MINBLOCKSIZE];
@@ -271,7 +270,7 @@ ULONGLONG print_block(HANDLE fh, ULONGLONG written, ULONGLONG position) {
 			&newread,
 			NULL
 		) || newread != MINBLOCKSIZE ) error_stopped(position+newread, fh);
-	} else {
+	} else {	// less than 512 bytes to show
 		if ( !ReadFile(fh,
 			charblock,
 			(DWORD)(written - position),
@@ -334,22 +333,18 @@ int main(int argc, char **argv) {
 	DWORD arg_blocksize = 0; // block size 0 = not set
 	int argullcnt = 0;
 	for (int i=2; i<argc; i++) {	// if there are more arguments
-		if ( ( argv[i][0] == '/' && argv[i][2] == 0 )	// x for two pass mode
-			&& ( argv[i][1] == 'x' || argv[i][1] == 'X' ) 
-		) {
-			if ( xtrasave ) error_toomany();
-			xtrasave = TRUE;
-		} else if ( ( argv[i][0] == '/' && argv[i][2] == 0 )
-			&& ( argv[i][1] == 'v' || argv[i][1] == 'V' )	// v for full verify
-		) {
-			if ( full_verify ) error_toomany();
-			full_verify = TRUE;
-		} else if ( ( argv[i][0] == '/' && argv[i][2] == 0 )
-			&& ( argv[i][1] == 'd' || argv[i][1] == 'D' )	// d for dummy mode
-		) {
-			if ( dummy ) error_toomany();
-			dummy = TRUE;
-		} else {
+		if ( argv[i][0] == '/' && argv[i][2] == 0 ) {	// swith?
+			if ( argv[i][1] == 'x' || argv[i][1] == 'X' ) {	// x for two pass mode
+				if ( xtrasave ) error_toomany();
+				xtrasave = TRUE;
+			} else if ( argv[i][1] == 'v' || argv[i][1] == 'V' ) {	// v for full verify
+				if ( full_verify ) error_toomany();
+				full_verify = TRUE;
+			} else if ( argv[i][1] == 'd' || argv[i][1] == 'D' ) {	// d for dummy mode
+				if ( dummy ) error_toomany();
+				dummy = TRUE;
+			} else error_wrong(argv[i]);
+		} else {	// not a swtich, may be blocksize?
 			arg_blocksize = read_blocksize(argv[i]);
 			if ( arg_blocksize > 0 ) {
 				if ( blocksize > 0 ) error_toomany();
@@ -365,10 +360,10 @@ int main(int argc, char **argv) {
 	if ( xtrasave ) printf("Pass 1 of 2, writing random bytes\n");
 	else printf("Pass 1 of 1, writing zeros\n");
 	fflush(stdout);	// spent one day finding out that this is needed for windows stdout
-	char *bytesof = (char*)malloc(32 * sizeof(char));	//  to print written bytes
+	char *bytesof = (char*)malloc(32 * sizeof(char));	//  to print "of ... bytes"
 	sprintf(bytesof, " of %llu bytes\n", towrite);
 	if ( dummy ) {	// dummy mode
-		if ( towrite >= MINCALCSIZE && blocksize == 0 ) {
+		if ( blocksize == 0 && towrite >= MINCALCSIZE ) {
 			printf("Calculating best block size\n");
 			fflush(stdout);
 			blocksize = MAXBLOCKSIZE;
@@ -419,7 +414,7 @@ int main(int argc, char **argv) {
 					bestduration = duration;
 					blocksize = size;
 				}
-				size = size >> 1;	// devide block by 2
+				size = size >> 1;	// size / 2
 			}
 		}  else if ( blocksize == 0 ) blocksize = MAXBLOCKSIZE;
 		printf("Using block size of %lu bytes\n", blocksize);

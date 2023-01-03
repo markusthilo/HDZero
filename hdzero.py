@@ -21,8 +21,8 @@ from threading import Thread
 from customtkinter import CTk, set_appearance_mode, set_default_color_theme
 from customtkinter import CTkToplevel, CTkFrame, CTkLabel
 from customtkinter import CTkButton, CTkEntry, CTkRadioButton
-from customtkinter import CTkCheckBox, CTkProgressBar
-from tkinter import StringVar, BooleanVar, PhotoImage, CENTER 
+from customtkinter import CTkCheckBox, CTkProgressBar, CTkOptionMenu
+from tkinter import StringVar, BooleanVar, PhotoImage, CENTER
 from tkinter.messagebox import askquestion, showwarning, showerror
 from tkinter.filedialog import askopenfilenames
 
@@ -57,6 +57,7 @@ class WinUtils:
 		self.cmd_startupinfo.dwFlags |= STARTF_USESHOWWINDOW
 		self.tmpscriptpath = parentpath/f'_diskpart_script_{GetCurrentProcessId()}.tmp'
 		self.zerod_path = parentpath/'zerod.exe'
+		self.this_drive = self.zerod_path.drive
 
 	def cmd_launch(self, cmd):
 		'Start command line subprocess without showing a terminal window'
@@ -68,11 +69,9 @@ class WinUtils:
 			universal_newlines = True
 		)
 
-	def zerod_launch(self, targetpath, targetsize=None, blocksize=None, extra=False):
+	def zerod_launch(self, targetpath, blocksize=None, extra=False):
 		'Use zerod.exe to wipe file or drive'
 		cmd = [self.zerod_path, targetpath]
-		if targetsize:
-			cmd.append(str(targetsize))
 		if blocksize:
 			cmd.append(str(blocksize))
 		if extra:
@@ -113,7 +112,30 @@ class WinUtils:
 					notdismounted.append(driveletter)
 		return notdismounted
 
+	def run_diskpart(self, script):
+		'Run diskpart script'
+		self.tmpscriptpath.write_text(script)
+		if self.dummy_mode:
+			return False
+		proc = self.cmd_launch(['diskpart', '/s', self.tmpscriptpath])
+		returncode = proc.wait()
+		self.tmpscriptpath.unlink()
+		return returncode
+
+	def clean_table(self, driveid):
+		'Clean partition table using diskpart'
+		try:
+			driveno = int(driveid[17:])
+		except ValueError:
+			return
+		if self.run_diskpart(f'''select disk {driveno}
+clean
+'''
+		) == 0:
+			return driveno
+
 	def create_partition(self, driveid, label, letter=None, table='gpt', fs='ntfs'):
+		'Create partition using diskpart'
 		try:
 			driveno = int(driveid[17:])
 		except ValueError:
@@ -128,24 +150,16 @@ class WinUtils:
 				return
 		else:
 			letter = letter.strip(':')
-		with open(self.tmpscriptpath, 'w') as fh:
-			fh.write(f'''select disk {driveno}
+		if self.run_diskpart(f'''select disk {driveno}
 clean
 convert {table}
 create partition primary
 format quick fs={fs} label={label}
 assign letter={letter}
 '''
-			)
-		if self.dummy_mode:
-			return letter + ':'
-		proc = self.cmd_launch(['diskpart', '/s', self.tmpscriptpath])
-		if proc.wait() == 0:
-			res = letter + ':'
-		else:
-			res = None
-		self.tmpscriptpath.unlink()
-		return res
+		):
+			return None
+		return letter + ':'
 
 class Logging:
 	'Log to file'
@@ -165,11 +179,8 @@ class Logging:
 
 	def write_log(self, logpath):
 		'Write log file'
-		with open(self.log_header_path, 'r') as fh:
-			self.log_string = fh.read() + self.log_string
 		self.append_log(self.timestamp())
-		with open(logpath, 'w') as fh:
-			fh.write(self.log_string)
+		logpath.write_text(self.log_header_path.read_text() + self.log_string)
 
 	def timestamp(self):
 		'Give timestamp for now'
@@ -177,13 +188,13 @@ class Logging:
 
 	def notepad_log_header(self):
 		'Edit log header file with Notepad'
-		proc = Popen(['notepad', self.log_header_path], stdout=PIPE, stderr=PIPE)
+		proc = Popen(['notepad', self.log_header_path])
 		proc.wait()
 
 class Gui(CTk, WinUtils, Logging):
 	'GUI look and feel'
 
-	PAD = 10
+	PAD = 8
 	SLIMPAD = 4
 	LABELWIDTH = 400
 	BARWIDTH = 200
@@ -254,7 +265,7 @@ class Gui(CTk, WinUtils, Logging):
 		if self.i_am_admin:	# no disk access without admin rights
 			### WIPE DRIVE ###
 			self.drive_frame = CTkFrame(self.main_frame)
-			self.drive_frame.pack(padx=self.PAD, pady=self.PAD)
+			self.drive_frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
 			head_frame = CTkFrame(self.drive_frame)
 			head_frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
 			CTkLabel(head_frame, text=self.conf['TEXT']['disklabel']).pack(
@@ -295,7 +306,13 @@ class Gui(CTk, WinUtils, Logging):
 			for drive in self.list_drives():
 				frame = CTkFrame(self.drive_frame)
 				frame.pack(padx=self.PAD, pady=(0, self.PAD), fill='both', expand=True)
-				CTkButton(frame, text=f'{labeltext} {drive.Index}', command=partial(self.wipe_disk, drive.Index)).pack(
+				partitions = [ part.Dependent.DeviceID for part in self.get_partitions(drive.index) ]
+				if self.this_drive in partitions or 'C:' in partitions:
+					print('DANGER')
+
+				############## WORKIN HERE ''''''''''''
+				
+				CTkButton(frame, text=f'{labeltext} {drive.Index}', hover_color="red", command=partial(self.wipe_disk, drive.Index)).pack(
 					padx=self.PAD, pady=self.SLIMPAD, side='left')
 				CTkLabel(frame, text=f'{drive.Caption}, {drive.MediaType} ({self.readable(drive.Size)})').pack(
 					padx=self.PAD, pady=self.SLIMPAD, anchor='w')
@@ -323,6 +340,18 @@ class Gui(CTk, WinUtils, Logging):
 		self.mainframe_user_opts['extra'] = BooleanVar(value=self.conf['DEFAULT']['extra'])
 		CTkCheckBox(master=frame, text=self.conf['TEXT']['extra'], variable=self.mainframe_user_opts['extra'],
 			onvalue=True, offvalue=False).pack(padx=self.PAD, pady=self.PAD, side='left')
+		self.mainframe_user_opts['full_verify'] = BooleanVar(value=self.conf['DEFAULT']['full_verify'])
+		CTkCheckBox(master=frame, text=self.conf['TEXT']['full_verify'],
+			variable=self.mainframe_user_opts['full_verify'], onvalue=True, offvalue=False).pack(
+			padx=self.PAD, pady=self.PAD, side='left')
+		CTkLabel(frame, text=self.conf['TEXT']['blocksize']).pack(padx=self.PAD, pady=self.PAD, side='left')
+		self.mainframe_user_opts['blocksize'] = StringVar(value=self.conf['DEFAULT']['blocksize'])
+		blocksizes = ['auto'] + [ str(2**p) for p in range(9, 20) ]
+		blocksizes.remove(self.conf['DEFAULT']['blocksize'])
+		blocksizes = [self.conf['DEFAULT']['blocksize']] + blocksizes
+		drop = CTkOptionMenu(master=frame, variable=self.mainframe_user_opts['blocksize'],
+			dynamic_resizing=False, values=blocksizes)
+		drop.pack(padx=self.PAD, pady=self.PAD, side='left')
 		self.mainframe_user_opts['askmore'] = BooleanVar(value=self.conf['DEFAULT']['askmore'])
 		CTkCheckBox(master=frame, text=self.conf['TEXT']['askmore'], variable=self.mainframe_user_opts['askmore'],
 			onvalue=True, offvalue=False).pack(padx=self.PAD, pady=self.PAD, side='left')
