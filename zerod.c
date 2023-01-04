@@ -1,4 +1,4 @@
-/* zerod v0.1-20230103 */
+/* zerod v0.1-20230104 */
 /* written for Windows + MinGW */
 /* Author: Markus Thilo' */
 /* E-mail: markus.thilo@gmail.com */
@@ -136,8 +136,8 @@ void error_stopped(ULONGLONG position, HANDLE fh) {
 	error_close(fh);
 }
 
-void error_notzero(ULONGLONG position, HANDLE fh) {
-	fprintf(stderr, "Error: found bytes that are not zero at or beyond %llu\n", position);
+void error_notzero(ULONGLONG blockstart, ULONGLONG blockend, HANDLE fh) {
+	fprintf(stderr, "Error: found bytes that are not zero in block %llu - %llu\n", blockstart, blockend);
 	error_close(fh);
 }
 
@@ -205,6 +205,7 @@ ULONGLONG verify_blocks(
 	DWORD ullperblock = blocksize >> 3;	// ull in one block = blocksize / 8
 	ULONGLONG ullblock[ullperblock];
 	ULONGLONG tominusblock;
+	ULONGLONG check;
 	DWORD newread;
 	if ( written - position >= blocksize ) {	// verify blocks
 		tominusblock = written - blocksize;
@@ -216,8 +217,9 @@ ULONGLONG verify_blocks(
 				&newread,
 				NULL
 			) || newread != blocksize ) error_stopped(position+newread, fh);
-			for (DWORD p=0; p<ullperblock; p++) if ( ullblock[p] != 0 )
-				error_notzero(position + (p<<3), fh);
+			check = 0;
+			for (DWORD p=0; p<ullperblock; p++) check = check | ullblock[p];
+			if ( check != 0 ) error_notzero(position, position+newread, fh);
 			position += blocksize;
 			if ( clock() >= printclock ) {
 				printf("... %llu%s", position, bytesof);
@@ -236,8 +238,9 @@ ULONGLONG verify_blocks(
 				&newread,
 				NULL
 			) || newread != MINBLOCKSIZE ) error_stopped(position+newread, fh);
-			for (DWORD p=0; p<ullperblock; p++) if ( ullblock[p] != 0 )
-				error_notzero(position + (p<<3), fh);
+			check = 0;
+			for (DWORD p=0; p<ullperblock; p++) check = check | ullblock[p];
+			if ( check != 0 ) error_notzero(position, position+newread, fh);
 			position += MINBLOCKSIZE;
 		}
 	}
@@ -250,7 +253,10 @@ ULONGLONG verify_blocks(
 			&newread,
 			NULL
 		) || newread != bytesleft ) error_stopped(position, fh);
-		for (DWORD p=0; p<bytesleft; p++) if ( byteblock[p] != 0 ) error_notzero(position, fh);
+		for (DWORD p=0; p<bytesleft; p++) if ( byteblock[p] != 0 ) {
+			fprintf(stderr, "Error: found byte that is not zero at position %lld\n", position+p);
+			error_close(fh);
+		}
 		position += bytesleft;
 	}
 	printf("... %llu%s", position, bytesof);
@@ -292,7 +298,7 @@ ULONGLONG print_block(HANDLE fh, ULONGLONG written, ULONGLONG position) {
 	}
 	printf("\n");
 	fflush(stdout);
-	if ( check != 0 ) error_notzero(position, fh);
+	if ( check != 0 ) error_notzero(position, position+newread, fh);
 	return position;
 }
 
@@ -355,6 +361,10 @@ int main(int argc, char **argv) {
 	/* End of CLI */
 	HANDLE fh = open_handle_write(argv[1]);	// open file or drive
 	ULONGLONG towrite = get_size(fh);	// get size of disk or file
+	if ( towrite == 0 ) {
+		printf("All done, 0 bytes to process");
+		exit(0);
+	}
 	ULONGLONG written = 0;	// to count written bytes
 	if ( dummy ) printf("Dummy mode, nothing will be written to disk\n");
 	if ( xtrasave ) printf("Pass 1 of 2, writing random bytes\n");
@@ -446,7 +456,7 @@ int main(int argc, char **argv) {
 	}
 	if ( full_verify ) {	// full verify checks every byte
 		ULONGLONG verified = verify_blocks(fh, written, 0, blocksize, bytesof);
-		printf("Veriefied %llu bytes\n", verified);
+		printf("Verified %llu bytes\n", verified);
 	}
 	ULONGLONG position = print_block(fh, written, 0);	// print first block
 	ULONGLONG halfblocks = written / ( MINBLOCKSIZE << 1 );
