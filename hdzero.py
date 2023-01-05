@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 
 __author__ = 'Markus Thilo'
-__version__ = '0.1_2023-01-04'
+__version__ = '0.1_2023-01-05'
 __license__ = 'GPL-3'
 __email__ = 'markus.thilo@gmail.com'
-__status__ = 'Under Construction'
+__status__ = 'Testing'
 __description__ = 'Wipe data'
 
 from pathlib import Path

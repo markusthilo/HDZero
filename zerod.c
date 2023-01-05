@@ -1,4 +1,4 @@
-/* zerod v0.1-20230104 */
+/* zerod v0.1-20230105 */
 /* written for Windows + MinGW */
 /* Author: Markus Thilo' */
 /* E-mail: markus.thilo@gmail.com */
