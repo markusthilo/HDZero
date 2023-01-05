@@ -209,6 +209,9 @@ ULONGLONG verify_blocks(
 	DWORD newread;
 	if ( written - position >= blocksize ) {	// verify blocks
 		tominusblock = written - blocksize;
+		
+		printf("I: position: %llu, written: %llu, tominusblock: %llu\n", position, written, tominusblock);
+		
 		clock_t printclock = clock() + ONESEC;
 		while ( position < tominusblock ) {
 			if ( !ReadFile(fh,
@@ -231,6 +234,9 @@ ULONGLONG verify_blocks(
 	if ( written - position >= MINBLOCKSIZE ) {	// verify minimal block that is left
 		tominusblock = written - MINBLOCKSIZE;
 		ullperblock = MINBLOCKSIZE >> 3;
+		
+		printf("II: position: %llu, written: %llu, tominusblock: %llu\n", position, written, tominusblock);
+		
 		while ( position < tominusblock ) {
 			if ( !ReadFile(fh,
 				ullblock,
@@ -246,6 +252,9 @@ ULONGLONG verify_blocks(
 	}
 	if ( position < written ) {	// verify less than minimal block - only for files, not disks
 		DWORD bytesleft = (DWORD)(written - position);
+		
+		printf("III: position: %llu, written: %llu, bytesleft: %lu\n", position, written, bytesleft);
+		
 		BYTE byteblock[bytesleft];
 		if ( !ReadFile(fh,
 			byteblock,
@@ -277,12 +286,18 @@ ULONGLONG print_block(HANDLE fh, ULONGLONG written, ULONGLONG position) {
 			NULL
 		) || newread != MINBLOCKSIZE ) error_stopped(position+newread, fh);
 	} else {	// less than 512 bytes to show
+	
+		
+		DWORD blocksize = written - position;
+		
+		printf("IV written: %llu, position: %llu, blocksize: %lu\n", written, position, blocksize);
+		
 		if ( !ReadFile(fh,
 			charblock,
-			(DWORD)(written - position),
+			blocksize,
 			&newread,
 			NULL
-		) || newread != MINBLOCKSIZE ) error_stopped(position+newread, fh);
+		) || newread != blocksize ) error_stopped(position+newread, fh);
 	}
 	printf("Bytes %llu - %llu:", position, position+newread);
 	int t = 1;
