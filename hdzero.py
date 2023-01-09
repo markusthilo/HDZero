@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 
 __author__ = 'Markus Thilo'
-__version__ = '0.1_2023-01-05'
-__license__ = 'GPL-3'
+__version__ = '0.9.0-0001_2023-01-09'
+__license__ = 'GPL 3'
 __email__ = 'markus.thilo@gmail.com'
-__status__ = 'Testing'
+__status__ = 'Beta'
 __description__ = 'Wipe data'
 
 from pathlib import Path
@@ -232,16 +232,18 @@ class Gui(CTk, WinUtils, Logging):
 		self.title(self.conf['TEXT']['title'])
 		self.app_icon = PhotoImage(file=self.__file_parentpath__/'icon.png')
 		self.iconphoto(False, self.app_icon)
-		self.mainframe_user_opts = dict()
-		self.mainframe()
+
 		if not self.i_am_admin and askquestion(
 			self.conf['TEXT']['warning_title'],
 			self.conf['TEXT']['notadmin']
 			) == 'yes':
-			self.destroy()
-			exit()
-		if self.dummy_mode:
-			showwarning(title = self.conf['TEXT']['warning_title'], message = 'DUMMY MODE!!!')
+			self.abort = True
+		else:
+			self.abort = False
+			if self.dummy_mode:
+				showwarning(title = self.conf['TEXT']['warning_title'], message = 'DUMMY MODE!!!')
+			self.mainframe_user_opts = dict()
+			self.mainframe()
 
 	def readable(self, size):
 		'Genereate readable size string'
@@ -671,4 +673,6 @@ class Gui(CTk, WinUtils, Logging):
 			self.quit_work()
 
 if __name__ == '__main__':  # start here
-	Gui().mainloop()
+	gui = Gui()
+	if not gui.abort:
+		gui.mainloop()

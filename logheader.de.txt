@@ -1,0 +1,3 @@
+Der Datenträger wurde mittels Überschreiben vollständig gelöscht.
+Hierfür wurde die Applikation HDZero verwendet (Open Source, GPL 3, https://github.com/markusthilo/HDZero).
+Protokoll des Löschvorgangs:

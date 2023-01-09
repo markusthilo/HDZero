@@ -1,8 +1,8 @@
-/* zerod v0.1-20230105 */
+/* zerod v0.9.0-0001_20230109 */
 /* written for Windows + MinGW */
 /* Author: Markus Thilo' */
 /* E-mail: markus.thilo@gmail.com */
-/* License: GPL-3 */
+/* License: GPL 3 */
 
 #include <stdlib.h>
 #include <stdio.h>
