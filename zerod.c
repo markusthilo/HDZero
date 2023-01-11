@@ -1,4 +1,4 @@
-/* zerod v0.9.0-0001_20230109 */
+/* zerod v1.0.0-0001_20230111 */
 /* written for Windows + MinGW */
 /* Author: Markus Thilo' */
 /* E-mail: markus.thilo@gmail.com */
@@ -89,25 +89,16 @@ void error_close(HANDLE fh) {
 /* Get size */
 ULONGLONG get_size(HANDLE fh) {
 	ULONGLONG size;
-	DISK_GEOMETRY pdg;	// disk?
-	if ( DeviceIoControl(
-		fh,
-		IOCTL_DISK_GET_DRIVE_GEOMETRY,
-		NULL,
-		0,
-		&pdg,
-		sizeof(pdg),
-        NULL,
-		NULL
-	) ) size = pdg.Cylinders.QuadPart * (ULONG)pdg.TracksPerCylinder *
-			(ULONG)pdg.SectorsPerTrack * (ULONG)pdg.BytesPerSector;
+	DISK_GEOMETRY_EX dge;		// disk?
+	if ( DeviceIoControl(fh, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, NULL, 0, &dge, sizeof(dge), NULL, NULL) )
+		size = dge.DiskSize.QuadPart;
 	else {	// file?
-		LARGE_INTEGER li_filesize;	// file size as a crappy win32 file type
+		LARGE_INTEGER li_filesize;
 		if ( !GetFileSizeEx(fh, &li_filesize) ) {
 			fprintf(stderr, "Error: could not determin a file or disk to wipe\n");
 			error_close(fh);
 		}
-		size = (ULONGLONG)li_filesize.QuadPart;
+		size = li_filesize.QuadPart;
 	}
 	return size;
 }
@@ -136,8 +127,8 @@ void error_stopped(ULONGLONG position, HANDLE fh) {
 	error_close(fh);
 }
 
-void error_notzero(ULONGLONG blockstart, ULONGLONG blockend, HANDLE fh) {
-	fprintf(stderr, "Error: found bytes that are not zero in block %llu - %llu\n", blockstart, blockend);
+void error_notzero(ULONGLONG position, HANDLE fh) {
+	fprintf(stderr, "Error: found bytes that are not wiped at %llu\n", position);
 	error_close(fh);
 }
 
@@ -169,10 +160,11 @@ ULONGLONG write_blocks(
 	DWORD blocksize,
 	char *bytesof
 ) {
+	ULONGLONG tominusblock;
 	BOOL writectrl;
 	DWORD newwritten;
-	if ( towrite - written > blocksize ) {	// write blocks
-		ULONGLONG tominusblock = towrite - blocksize;
+	if ( towrite - written >= blocksize ) {	// write blocks
+		tominusblock = towrite - blocksize;
 		clock_t printclock = clock() + ONESEC;
 		while ( written < tominusblock ) {	// write blocks
 			if ( !WriteFile(fh, maxblock, blocksize, &newwritten, NULL)
@@ -185,12 +177,24 @@ ULONGLONG write_blocks(
 			}
 		}
 	}
-	DWORD wltowrite = towrite - written;	// last block
-	writectrl = WriteFile(fh, maxblock, wltowrite, &newwritten, NULL);	// write what's left
-	written += newwritten;
-	if ( !writectrl || newwritten < wltowrite ) error_stopped(written, fh);
-	printf("... %llu%s", written, bytesof);
-	fflush(stdout);
+	if ( towrite - written >= MINBLOCKSIZE ) {	// write minimal full blocks
+		tominusblock = towrite - MINBLOCKSIZE;
+		while ( written < tominusblock ) {	// write minimal blocks (512 Bytes)
+			if ( !WriteFile(fh, maxblock, MINBLOCKSIZE, &newwritten, NULL)
+				|| newwritten < MINBLOCKSIZE ) error_stopped(written+newwritten, fh);
+			written += newwritten;
+		}
+		printf("... %llu%s", written, bytesof);
+		fflush(stdout);
+	}
+	DWORD lasttowrite = towrite - written;
+	if ( lasttowrite > 0 ) {	// last block < 512 bytes
+		if ( !WriteFile(fh, maxblock, lasttowrite, &newwritten, NULL)
+			|| newwritten < lasttowrite )  error_stopped(written+newwritten, fh);
+		written += newwritten;
+		printf("... %llu%s", written, bytesof);
+		fflush(stdout);
+	}
 	return written;
 }
 
@@ -198,16 +202,18 @@ ULONGLONG write_blocks(
 ULONGLONG verify_blocks(
 	HANDLE fh,
 	ULONGLONG written,
-	ULONGLONG position,
+	BYTE zeroff,
 	DWORD blocksize,
 	char *bytesof
 ) {
+	ULONGLONG position = 0;
 	DWORD ullperblock = blocksize >> 3;	// ull in one block = blocksize / 8
 	ULONGLONG ullblock[ullperblock];
 	ULONGLONG tominusblock;
 	ULONGLONG check;
+	memset(&check, zeroff, sizeof(ULONGLONG));
 	DWORD newread;
-	if ( written - position >= blocksize ) {	// verify blocks
+	if ( written >= blocksize ) {	// verify blocks
 		tominusblock = written - blocksize;
 		clock_t printclock = clock() + ONESEC;
 		while ( position < tominusblock ) {
@@ -217,9 +223,8 @@ ULONGLONG verify_blocks(
 				&newread,
 				NULL
 			) || newread != blocksize ) error_stopped(position+newread, fh);
-			check = 0;
-			for (DWORD p=0; p<ullperblock; p++) check = check | ullblock[p];
-			if ( check != 0 ) error_notzero(position, position+newread, fh);
+			for (DWORD p=0; p<ullperblock; p++)
+				if ( ullblock[p] != check ) error_notzero(position + ( p * sizeof(ULONGLONG) ), fh);
 			position += blocksize;
 			if ( clock() >= printclock ) {
 				printf("... %llu%s", position, bytesof);
@@ -238,34 +243,36 @@ ULONGLONG verify_blocks(
 				&newread,
 				NULL
 			) || newread != MINBLOCKSIZE ) error_stopped(position+newread, fh);
-			check = 0;
-			for (DWORD p=0; p<ullperblock; p++) check = check | ullblock[p];
-			if ( check != 0 ) error_notzero(position, position+newread, fh);
+			for (DWORD p=0; p<ullperblock; p++)
+				if ( ullblock[p] != check ) error_notzero(position + ( p * sizeof(ULONGLONG) ), fh);
 			position += MINBLOCKSIZE;
 		}
+		printf("... %llu%s", position, bytesof);
+		fflush(stdout);
 	}
 	if ( position < written ) {	// verify less than minimal block - only for files, not disks
 		DWORD bytesleft = (DWORD)(written - position);
 		BYTE byteblock[bytesleft];
+		memset(byteblock, zeroff, bytesleft);
 		if ( !ReadFile(fh,
 			byteblock,
 			bytesleft,
 			&newread,
 			NULL
 		) || newread != bytesleft ) error_stopped(position, fh);
-		for (DWORD p=0; p<bytesleft; p++) if ( byteblock[p] != 0 ) {
+		for (DWORD p=0; p<bytesleft; p++) if ( byteblock[p] != zeroff ) {
 			fprintf(stderr, "Error: found byte that is not zero at position %lld\n", position+p);
 			error_close(fh);
 		}
 		position += bytesleft;
+		printf("... %llu%s", position, bytesof);
+		fflush(stdout);
 	}
-	printf("... %llu%s", position, bytesof);
-	fflush(stdout);
 	return position;
 }
 
 /* Print block to stdout */
-ULONGLONG print_block(HANDLE fh, ULONGLONG written, ULONGLONG position) {
+ULONGLONG print_block(HANDLE fh, ULONGLONG written, ULONGLONG position, BYTE zeroff) {
 	set_pointer(fh, position);
 	BYTE charblock[MINBLOCKSIZE];
 	DWORD newread;
@@ -285,22 +292,21 @@ ULONGLONG print_block(HANDLE fh, ULONGLONG written, ULONGLONG position) {
 			NULL
 		) || newread != blocksize ) error_stopped(position+newread, fh);
 	}
-	printf("Bytes %llu - %llu:", position, position+newread);
+	printf("Bytes %llu - %llu", position, position+newread);
 	int t = 1;
-	BYTE check;
+	BOOL badbyte = FALSE;
 	for (DWORD p=0; p<newread; p++) {
 		if ( --t == 0 ) {
 			printf("\n");
 			t = VERIFYPRINTLENGTH;
 		}
 		printf("%02X ", charblock[p]);
-
-		check = check | charblock[p];
+		if ( charblock[p] != zeroff ) badbyte = TRUE;
 	}
 	printf("\n");
 	fflush(stdout);
-	if ( check != 0 ) error_notzero(position, position+newread, fh);
-	return position;
+	if ( badbyte ) error_notzero(position, fh);
+	return position + newread;
 }
 
 /* Pretend to Write */
@@ -333,6 +339,7 @@ int main(int argc, char **argv) {
 		fprintf(stderr, "Error: Missing argument(s)\n");
 		exit(1);
 	}
+	BYTE zeroff = 0;	// char / value to write
 	DWORD blocksize = 0;	// block size to write
 	BOOL xtrasave = FALSE;	// randomized overwrite
 	BOOL full_verify = FALSE; // to verify every byte
@@ -344,6 +351,9 @@ int main(int argc, char **argv) {
 			if ( argv[i][1] == 'x' || argv[i][1] == 'X' ) {	// x for two pass mode
 				if ( xtrasave ) error_toomany();
 				xtrasave = TRUE;
+			} else if ( argv[i][1] == 'f' || argv[i][1] == 'F' ) {	// f to fill with 0xff
+				if ( zeroff != 0 ) error_toomany();
+				zeroff = 0xff;
 			} else if ( argv[i][1] == 'v' || argv[i][1] == 'V' ) {	// v for full verify
 				if ( full_verify ) error_toomany();
 				full_verify = TRUE;
@@ -369,7 +379,7 @@ int main(int argc, char **argv) {
 	ULONGLONG written = 0;	// to count written bytes
 	if ( dummy ) printf("Dummy mode, nothing will be written to disk\n");
 	if ( xtrasave ) printf("Pass 1 of 2, writing random bytes\n");
-	else printf("Pass 1 of 1, writing zeros\n");
+	else printf("Pass 1 of 1, writing 0x%02X\n", zeroff);
 	fflush(stdout);	// spent one day finding out that this is needed for windows stdout
 	char *bytesof = (char*)malloc(32 * sizeof(char));	//  to print "of ... bytes"
 	sprintf(bytesof, " of %llu bytes\n", towrite);
@@ -401,7 +411,7 @@ int main(int argc, char **argv) {
 		if ( blocksize > 0 ) maxblocksize = blocksize; 
 		BYTE maxblock[maxblocksize];	// generate block to write
 		if ( xtrasave ) for (int i=0; i<maxblocksize; i++) maxblock[i] = (char)rand();
-		else memset(maxblock, 0, maxblocksize);
+		else memset(maxblock, zeroff, maxblocksize);
 		if ( blocksize == 0 && towrite >= MINCALCSIZE ) {	// calculate best/fastes block size
 			DWORD newwritten;
 			printf("Calculating best block size\n");
@@ -434,9 +444,9 @@ int main(int argc, char **argv) {
 		written = write_blocks(fh, maxblock, towrite, written, blocksize, bytesof);
 		/* Second passs */
 		if ( xtrasave ) {
-			printf("Pass 2 of 2, writing zeros\n");
+			printf("Pass 2 of 2, writing 0x%02X\n", zeroff);
 			fflush(stdout);
-			memset(maxblock, 0, sizeof(maxblock));	// fill array with zeros
+			memset(maxblock, zeroff, maxblocksize);
 			close_handle(fh);	// close
 			fh = open_handle_write(argv[1]);	// and open again for second pass
 			if ( fh == INVALID_HANDLE_VALUE ) {
@@ -456,15 +466,15 @@ int main(int argc, char **argv) {
 		error_close(fh);
 	}
 	if ( full_verify ) {	// full verify checks every byte
-		ULONGLONG verified = verify_blocks(fh, written, 0, blocksize, bytesof);
+		ULONGLONG verified = verify_blocks(fh, written, zeroff, blocksize, bytesof);
 		printf("Verified %llu bytes\n", verified);
 	}
-	ULONGLONG position = print_block(fh, written, 0);	// print first block
+	ULONGLONG position = print_block(fh, written, 0, zeroff);	// print first block
 	ULONGLONG halfblocks = written / ( MINBLOCKSIZE << 1 );
-	if ( halfblocks > 4 ) position = print_block(fh, written, halfblocks*MINBLOCKSIZE);
-	if ( position + MINBLOCKSIZE <= written ) print_block(fh, written, written-MINBLOCKSIZE);
-	else if ( position < written ) print_block(fh, written, position);
+	if ( halfblocks >= 4 ) position = print_block(fh, written, halfblocks*MINBLOCKSIZE, zeroff);
+	if ( position + MINBLOCKSIZE <= written ) print_block(fh, written, written-MINBLOCKSIZE, zeroff);
+	else if ( position < written ) print_block(fh, written, position, zeroff);
 	close_handle(fh);
-	printf("All done, %llu bytes were zeroed\n", written);
+	printf("All done, %llu bytes were wiped\n", written);
 	exit(0);
 }

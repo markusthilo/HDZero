@@ -2,11 +2,11 @@
 # -*- coding: utf-8 -*-
 
 __author__ = 'Markus Thilo'
-__version__ = '0.9.0-0001_2023-01-09'
+__version__ = '1.0.0-0001_2023-01-11'
 __license__ = 'GPL 3'
 __email__ = 'markus.thilo@gmail.com'
-__status__ = 'Beta'
-__description__ = 'Wipe data'
+__status__ = 'Release'
+__description__ = 'Wipe HDDs'
 
 from pathlib import Path
 from configparser import ConfigParser
@@ -24,7 +24,7 @@ from customtkinter import CTkButton, CTkEntry, CTkRadioButton
 from customtkinter import CTkCheckBox, CTkProgressBar, CTkOptionMenu
 from tkinter import StringVar, BooleanVar, PhotoImage, CENTER
 from tkinter.messagebox import askquestion, showwarning, showerror
-from tkinter.filedialog import askopenfilenames
+from tkinter.filedialog import askopenfilenames, asksaveasfilename
 
 class Config(ConfigParser):
 	'Handle config file'
@@ -45,6 +45,9 @@ class Config(ConfigParser):
 
 class WinUtils:
 	'Needed Windows functions'
+
+	WINCMD_TIMEOUT = 10
+	WINCMD_RETRIES = 6
 
 	def __init__(self, parentpath, dummy=False):
 		'Generate Windows tools'
@@ -69,7 +72,7 @@ class WinUtils:
 			universal_newlines = True
 		)
 
-	def zerod_launch(self, targetpath, blocksize=None, extra=False, verify=False):
+	def zerod_launch(self, targetpath, blocksize=None, extra=False, writeff=False, verify=False):
 		'Use zerod.exe to wipe file or drive'
 		cmd = [self.zerod_path, targetpath]
 		if blocksize:
@@ -82,6 +85,8 @@ class WinUtils:
 					cmd.append(str(blocksize))
 		if extra:
 			cmd.append('/x')
+		if writeff:
+			cmd.append('/f')
 		if verify:
 			cmd.append('/v')
 		if self.dummy_mode:
@@ -112,25 +117,35 @@ class WinUtils:
 
 	def dismount_drives(self, driveletters):
 		'Dismount Drives'
-		notdismounted = list()
 		for driveletter in driveletters:
 			proc = self.cmd_launch(['mountvol', driveletter, '/p'])
-			if proc.wait() != 0:
-				notdismounted.append(driveletter)
-		return notdismounted
+			try:
+				proc.wait(timeout=self.WINCMD_TIMEOUT)
+			except:
+				pass
+		stillmounted = driveletters
+		for cnt in range(self.WINCMD_RETRIES):
+			for driveletter in stillmounted:
+				if not Path(driveletter).exists():
+					stillmounted.remove(driveletter)
+			if stillmounted == list():
+				return
+			sleep(self.WINCMD_TIMEOUT)
+		return stillmounted
 
 	def run_diskpart(self, script):
 		'Run diskpart script'
 		self.tmpscriptpath.write_text(script)
 		proc = self.cmd_launch(['diskpart', '/s', self.tmpscriptpath])
-		proc.wait()
+		try:
+			ret = proc.wait(timeout=self.WINCMD_TIMEOUT)
+		except:
+			ret = None
 		try:
 			self.tmpscriptpath.unlink()
 		except:
 			return
-		stdout = ''.join(proc.stdout)
-		if ''.join(proc.stderr) == '':
-			return stdout
+		return ret
 
 	def clean_table(self, driveid):
 		'Clean partition table using diskpart'
@@ -142,7 +157,7 @@ class WinUtils:
 clean
 list partition
 '''
-		)
+		)	# list partiton makes shure that the disk is free to write
 
 	def create_partition(self, driveid, label, letter=None, table='gpt', fs='ntfs'):
 		'Create partition using diskpart'
@@ -158,17 +173,20 @@ list partition
 					break
 			else:
 				return
+			letter = pure_letter + ':'
 		else:
 			pure_letter = letter.strip(':')
-		if self.run_diskpart(f'''select disk {driveno}
+		ret = self.run_diskpart(f'''select disk {driveno}
 clean
 convert {table}
 create partition primary
 format quick fs={fs} label={label}
 assign letter={pure_letter}
-'''
-		):
-			return pure_letter
+''')
+		for cnt in range(self.WINCMD_RETRIES):
+			if Path(letter).exists():
+				return letter
+			sleep(self.WINCMD_TIMEOUT)
 
 class Logging:
 	'Log to file'
@@ -188,12 +206,17 @@ class Logging:
 
 	def write_log(self, logpath):
 		'Write log file'
-		self.append_log(self.timestamp())
-		logpath.write_text(self.log_header_path.read_text() + self.log_string)
+		if logpath:
+			with open(logpath, 'w') as lf:
+				lf.write(self.log_header_path.read_text() + self.log_string)
 
 	def timestamp(self):
 		'Give timestamp for now'
 		return datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+
+	def log_timestamp(self):
+		'Append timestamp to log'
+		self.append_log(self.timestamp())
 
 	def notepad_log_header(self):
 		'Edit log header file with Notepad'
@@ -229,7 +252,7 @@ class Gui(CTk, WinUtils, Logging):
 		CTk.__init__(self)
 		set_appearance_mode(self.conf['APPEARANCE']['mode'])
 		set_default_color_theme(self.conf['APPEARANCE']['color_theme'])
-		self.title(self.conf['TEXT']['title'])
+		self.title(self.conf['TEXT']['title'] + f' {__version__}')
 		self.app_icon = PhotoImage(file=self.__file_parentpath__/'icon.png')
 		self.iconphoto(False, self.app_icon)
 
@@ -249,21 +272,20 @@ class Gui(CTk, WinUtils, Logging):
 		'Genereate readable size string'
 		try:
 			size = int(size)
-		except TypeError:
+		except (TypeError, ValueError):
 			return self.conf['TEXT']['undetected']
-		bytes_str = self.conf['TEXT']['bytes']
-		outstr = f'{size} {bytes_str}'
+		strings = list()
 		for base in self.SIZEBASE:
-			for apx, b in base.items():
-				res = size/b
-				rnd = round(res, 2)
+			for u, b in base.items():
+				rnd = round(size/b, 2)
 				if rnd >= 1:
-					outstr += ', '
-					if res != rnd:
-						outstr += self.conf['TEXT']['approx'] + ' '
-					outstr += f'{rnd} {apx}'
 					break
-		return outstr
+			if rnd >= 10:
+				rnd = round(rnd,1)
+			if rnd >= 100:
+				rnd = round(rnd)
+			strings.append(f'{rnd} {u}')
+		return ' / '.join(strings)
 
 	def list_to_string(self, strings):
 		'One per line'
@@ -276,7 +298,6 @@ class Gui(CTk, WinUtils, Logging):
 		'Define Main Frame'
 		self.main_frame = CTkFrame(self)
 		self.main_frame.pack()
-
 		if self.i_am_admin:	# no disk access without admin rights
 			### WIPE DRIVE ###
 			self.drive_frame = CTkFrame(self.main_frame)
@@ -287,12 +308,12 @@ class Gui(CTk, WinUtils, Logging):
 				padx=2*self.PAD, pady=self.PAD, side='left')
 			opt_frame = CTkFrame(self.drive_frame)
 			opt_frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
-			### OPTION FRAME ###
+			### DISK OPTIONS FRAME ###
 			CTkButton(opt_frame, text=self.conf['TEXT']['refresh'],
 				command=self.refresh).grid(padx=self.PAD, pady=(self.PAD,0), row=0, column=0, sticky='w')
 			self.mainframe_user_opts['parttable'] = StringVar(value=self.conf['DEFAULT']['parttable'])
 			CTkRadioButton(master=opt_frame, variable=self.mainframe_user_opts['parttable'],
-				value=None, text=self.conf['TEXT']['no_diskpart']).grid(
+				value='None', text=self.conf['TEXT']['no_diskpart']).grid(
 				padx=self.PAD, pady=(self.PAD, 0), row=0, column=1, sticky='w')
 			CTkRadioButton(master=opt_frame, variable=self.mainframe_user_opts['parttable'],
 				value='gpt', text='GPT').grid(padx=self.PAD, row=1, column=1, sticky='w')
@@ -358,17 +379,22 @@ class Gui(CTk, WinUtils, Logging):
 		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
 		CTkButton(frame, text=self.conf['TEXT']['wipefile'], command=self.wipe_files).pack(
 			padx=self.PAD, pady=self.PAD, side='left')
+		CTkLabel(frame, text=self.conf['TEXT']['filelabel']).pack(padx=self.PAD, pady=self.PAD, side='left')
 		self.mainframe_user_opts['deletefile'] = BooleanVar(value=self.conf['DEFAULT']['deletefile'])
 		CTkCheckBox(master=frame, text=self.conf['TEXT']['deletefile'], variable=self.mainframe_user_opts['deletefile'],
 			onvalue=True, offvalue=False).pack(padx=self.PAD, pady=self.PAD, side='left')
-		CTkLabel(frame, text=self.conf['TEXT']['filelabel']).pack(padx=self.PAD, pady=self.PAD, side='left')
-		### BOTTOM ###
+		### GENERAL OPTIONS FRAME ###
 		frame = CTkFrame(self.main_frame)
 		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
 		frame = CTkFrame(frame)
 		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
 		self.mainframe_user_opts['extra'] = BooleanVar(value=self.conf['DEFAULT']['extra'])
+
 		CTkCheckBox(master=frame, text=self.conf['TEXT']['extra'], variable=self.mainframe_user_opts['extra'],
+			onvalue=True, offvalue=False).pack(padx=self.PAD, pady=self.PAD, side='left')
+
+		self.mainframe_user_opts['writeff'] = BooleanVar(value=self.conf['DEFAULT']['writeff'])
+		CTkCheckBox(master=frame, text=self.conf['TEXT']['writeff'], variable=self.mainframe_user_opts['writeff'],
 			onvalue=True, offvalue=False).pack(padx=self.PAD, pady=self.PAD, side='left')
 		self.mainframe_user_opts['full_verify'] = BooleanVar(value=self.conf['DEFAULT']['full_verify'])
 		CTkCheckBox(master=frame, text=self.conf['TEXT']['full_verify'],
@@ -382,6 +408,11 @@ class Gui(CTk, WinUtils, Logging):
 		drop = CTkOptionMenu(master=frame, variable=self.mainframe_user_opts['blocksize'],
 			dynamic_resizing=False, values=blocksizes)
 		drop.pack(padx=self.PAD, pady=self.PAD, side='left')
+		### BOTTOM ###
+		frame = CTkFrame(self.main_frame)
+		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
+		frame = CTkFrame(frame)
+		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
 		self.mainframe_user_opts['askmore'] = BooleanVar(value=self.conf['DEFAULT']['askmore'])
 		CTkCheckBox(master=frame, text=self.conf['TEXT']['askmore'], variable=self.mainframe_user_opts['askmore'],
 			onvalue=True, offvalue=False).pack(padx=self.PAD, pady=self.PAD, side='left')
@@ -460,7 +491,7 @@ class Gui(CTk, WinUtils, Logging):
 				self.zerod_proc.terminate()
 		self.work_frame.destroy()
 		self.deiconify()
-		self.update()
+		self.refresh()
 
 	def watch_zerod(self, files_of_str = ''):
 		'Handle output of zerod'
@@ -471,7 +502,7 @@ class Gui(CTk, WinUtils, Logging):
 		using_blocksize_str = self.conf['TEXT']['using_blocksize']
 		verifying_str = self.conf['TEXT']['verifying']
 		verified_str = self.conf['TEXT']['verified']
-		were_zeroed_str = self.conf['TEXT']['were_zeroed']
+		were_wiped_str = self.conf['TEXT']['were_wiped']
 		pass_of_str = ''
 		for msg_raw in self.zerod_proc.stdout:
 			msg_split = msg_raw.split()
@@ -493,17 +524,17 @@ class Gui(CTk, WinUtils, Logging):
 				self.blocksize = msg_split[4]
 				self.main_info.set(f'{using_blocksize_str} {self.blocksize} {bytes_str}')
 			elif msg_split[0] == 'Verifying':
+				pass_of_str = ''
 				info = f'{verifying_str} {msg_split[1]}'
 				self.main_info.set(info)
 			elif msg_split[0] == 'Verified':
 				info = f'{verified_str} {msg_split[1]} {bytes_str}'
 				self.main_info.set(info)
 			elif msg_split[0] == 'All':
-				info = f'{msg_split[2]} {bytes_str} {were_zeroed_str}'
+				info = f'{msg_split[2]} {bytes_str} {were_wiped_str}'
 				self.main_info.set(info)
 			else:
 				info = msg
-				self.main_info.set(msg)
 			if info and self.options['writelog']:
 				self.append_log(info)
 
@@ -530,10 +561,10 @@ class Gui(CTk, WinUtils, Logging):
 			question += self.conf['TEXT']['nomounted']
 		if self.confirm(question):
 			self.work_target = drive.DeviceID
-			notdismounted = self.dismount_drives(driveletters)
-			if notdismounted != list():
+			stillmounted = self.dismount_drives(driveletters)
+			if stillmounted:
 				warning = self.conf['TEXT']['not_dismount'] + ' '
-				warning += ', '.join(notdismounted)
+				warning += ', '.join(stillmounted)
 				warning += '\n\n' + self.conf['TEXT']['dismount_manually']
 				showwarning(title=self.conf['TEXT']['warning_title'], message=warning)
 			else:
@@ -559,15 +590,17 @@ class Gui(CTk, WinUtils, Logging):
 		self.workframe(self.conf['TEXT']['wipedrive'])
 		self.head_info.set(self.work_target) 
 		self.main_info.set(self.conf['TEXT']['cleaning_table'])
-		if not self.clean_table(self.work_target):
+		if self.clean_table(self.work_target) != 0:
 			showwarning(title=self.conf['TEXT']['warning_title'],
 				message=self.conf['TEXT']['not_clean_table'] + f' {self.work_target}')
+			self.working = False
 			self.quit_work()
 			return
 		self.zerod_proc = self.zerod_launch(
 			self.work_target,
 			blocksize = self.options['blocksize'],
 			extra = self.options['extra'],
+			writeff = self.options['writeff'],
 			verify = self.options['full_verify']
 		)
 		self.watch_zerod()
@@ -576,12 +609,14 @@ class Gui(CTk, WinUtils, Logging):
 		if self.zerod_proc.wait() != 0 and not self.dummy_mode:
 			showerror(
 				self.conf['TEXT']['error'],
-				self.conf['TEXT']['errorwhile'] + f' {self.work_target}'
+				self.conf['TEXT']['errorwhile'] + f' {self.work_target} \n\n {self.zerod_proc.stderr.read()}'
 			)
+			self.working = False
 			self.quit_work()
 			return
 		self.progress_info.set('')
-		if self.options['parttable']:
+		mounted = None
+		if self.options['parttable'] != 'None':
 			self.main_info.set(self.conf['TEXT']['creatingpartition'])
 			self.progressbar.configure(mode="indeterminate")
 			self.progressbar.start()
@@ -595,20 +630,27 @@ class Gui(CTk, WinUtils, Logging):
 			if mounted:
 				info = self.conf['TEXT']['newpartition'] + f' {mounted}'
 				self.main_info.set(info)
-				if self.options['writelog']:
-					logpath = Path(mounted + ':\\')/'hdzero-log.txt'
-					self.write_log(logpath)
 			else:
 				showwarning(
 					title = self.conf['TEXT']['warning_title'],
 					message = self.conf['TEXT']['couldnotcreate']
 				)
+		self.working = False
+		if self.options['writelog']:
+			self.log_timestamp()
+			logpath = None
+			if mounted:
+				logpath = Path(mounted)/'hdzero-log.txt'
+			else:
+				filename = asksaveasfilename(title=self.conf['TEXT']['write_log'], defaultextension='.txt')
+				if filename:
+					logpath = Path(filename)
+			self.write_log(logpath)
 		self.main_info.set(self.conf['TEXT']['all_done'])
 		self.progress_info.set('100 %')
 		self.progressbar.stop()
 		self.progressbar.configure(mode='determinate')
 		self.progressbar.set(1)
-		self.working = False
 
 	def wipe_files(self):
 		'Wipe selected file or files - launch thread'
@@ -645,6 +687,7 @@ class Gui(CTk, WinUtils, Logging):
 				file,
 				blocksize = self.blocksize,
 				extra = self.options['extra'],
+				writeff = self.options['writeff'],
 				verify = self.options['full_verify']
 			)
 			if qt_files > 1:
