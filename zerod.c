@@ -1,8 +1,8 @@
-/* zerod v1.0.0-0001_20230111 */
+/* zerod v1.0.1_20230112 */
 /* written for Windows + MinGW */
 /* Author: Markus Thilo' */
 /* E-mail: markus.thilo@gmail.com */
-/* License: GPL 3 */
+/* License: GPL-3 */
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -16,8 +16,10 @@ const clock_t MAXCLOCK = 0x7fffffff;
 const clock_t ONESEC = 1000000 / CLOCKS_PER_SEC;
 const DWORD MAXBLOCKSIZE = 0x100000;
 const DWORD MINBLOCKSIZE = 0x200;	// 512 bytes = 1 sector
-const DWORD MAXCOUNTER = 0x10;
+const int TESTBLOCKS = 0x10;
 const ULONGLONG MINCALCSIZE = 0x100000000;
+const int RETRIES = 20;
+const DWORD RETRY_SLEEP = 1000;
 const int VERIFYPRINTLENGTH = 32;
 const DWORD DUMMYSLEEP = 250;
 const int DUMMYCNT = 10;
@@ -151,6 +153,26 @@ void set_pointer(HANDLE fh, ULONGLONG position) {
 	}
 }
 
+/* Retry to write on write errors */
+ULONGLONG retry_write_block(
+	HANDLE fh,
+	BYTE *maxblock,
+	ULONGLONG position,
+	DWORD blocksize
+) {
+	DWORD newwritten;
+	printf("Warning: could not write, retrying to write block at %llu of %lu bytes\n", position, blocksize);
+	for (int cnt=RETRIES; cnt>=1; cnt--) {
+		printf("Retrying %d... \n", cnt);
+		fflush(stdout);
+		set_pointer(fh, position);
+		if ( WriteFile(fh, maxblock, blocksize, &newwritten, NULL) && newwritten == blocksize )
+			return position + newwritten;
+		Sleep(RETRY_SLEEP);
+	}
+	error_stopped(position+newwritten, fh);
+}
+
 /* Write bytes to file by given block size */
 ULONGLONG write_blocks(
 	HANDLE fh,
@@ -160,16 +182,14 @@ ULONGLONG write_blocks(
 	DWORD blocksize,
 	char *bytesof
 ) {
-	ULONGLONG tominusblock;
-	BOOL writectrl;
-	DWORD newwritten;
 	if ( towrite - written >= blocksize ) {	// write blocks
-		tominusblock = towrite - blocksize;
+		ULONGLONG tominusblock = towrite - blocksize;
+		DWORD newwritten;
 		clock_t printclock = clock() + ONESEC;
 		while ( written < tominusblock ) {	// write blocks
-			if ( !WriteFile(fh, maxblock, blocksize, &newwritten, NULL)
-				|| newwritten < blocksize ) error_stopped(written+newwritten, fh);
-			written += newwritten;
+			if ( !WriteFile(fh, maxblock, blocksize, &newwritten, NULL) || newwritten < blocksize )
+				written = retry_write_block(fh, maxblock, written, blocksize);
+			else written += newwritten;
 			if ( clock() >= printclock ) {
 				printf("... %llu%s", written, bytesof);
 				fflush(stdout);
@@ -177,52 +197,111 @@ ULONGLONG write_blocks(
 			}
 		}
 	}
-	if ( towrite - written >= MINBLOCKSIZE ) {	// write minimal full blocks
-		tominusblock = towrite - MINBLOCKSIZE;
-		while ( written < tominusblock ) {	// write minimal blocks (512 Bytes)
-			if ( !WriteFile(fh, maxblock, MINBLOCKSIZE, &newwritten, NULL)
-				|| newwritten < MINBLOCKSIZE ) error_stopped(written+newwritten, fh);
-			written += newwritten;
-		}
-		printf("... %llu%s", written, bytesof);
-		fflush(stdout);
-	}
-	DWORD lasttowrite = towrite - written;
-	if ( lasttowrite > 0 ) {	// last block < 512 bytes
-		if ( !WriteFile(fh, maxblock, lasttowrite, &newwritten, NULL)
-			|| newwritten < lasttowrite )  error_stopped(written+newwritten, fh);
-		written += newwritten;
-		printf("... %llu%s", written, bytesof);
-		fflush(stdout);
-	}
 	return written;
+}
+
+/* Write bytes to file by given block size */
+ULONGLONG write_to(
+	HANDLE fh,
+	BYTE *maxblock,
+	ULONGLONG towrite,
+	ULONGLONG written,
+	DWORD blocksize,
+	char *bytesof
+) {
+	written = write_blocks(fh, maxblock, towrite, written, blocksize, bytesof);	// write full block size
+	written = write_blocks(fh, maxblock, towrite, written, MINBLOCKSIZE, bytesof);	// write minimal full blocks
+	DWORD leftsize = towrite - written;
+	if ( leftsize > 0 ) {	// < 512 bytes
+		DWORD newwritten;
+		if ( !WriteFile(fh, maxblock, leftsize, &newwritten, NULL) || newwritten < leftsize )
+			written = retry_write_block(fh, maxblock, written, leftsize);
+		else written += newwritten;
+	}
+	printf("... %llu%s", written, bytesof);
+	fflush(stdout);
+	return written;
+}
+
+/* Write by given block size and easure the time needed */
+clock_t write_blocks_timer(
+	HANDLE fh,
+	BYTE *maxblock,
+	int blockstw,
+	DWORD blocksize,
+	ULONGLONG written
+) {
+	DWORD newwritten;
+	clock_t start = clock();	// get start time
+	for (int blockcnt=0; blockcnt<blockstw; blockcnt++) {
+		if ( !WriteFile(fh, maxblock, blocksize, &newwritten, NULL) || newwritten < blocksize ) {
+			set_pointer(fh, written);	// ...go back to last correct block
+			return ~blockcnt;	// return negative blocks on write error
+		}
+		written += newwritten;
+	}
+	return clock() - start;	// return duration of writeprocess
+}
+
+/* Retry to read block of ULONGLONGs */
+void retry_read_ullblock(
+	HANDLE fh,
+	ULONGLONG *ullblock,
+	ULONGLONG position,
+	DWORD blocksize
+) {
+	DWORD newread;
+	printf("Warning: could not read, retrying to read block at %llu of %lu bytes\n", position, blocksize);
+	for (int cnt=RETRIES; cnt>=1; cnt--) {
+		printf("Retrying %d... \n", cnt);
+		fflush(stdout);
+		set_pointer(fh, position);
+		if ( ReadFile(fh, ullblock, blocksize, &newread, NULL) && newread == blocksize ) return;
+		Sleep(RETRY_SLEEP);
+	}
+	error_stopped(position+newread, fh);
+}
+
+/* Retry to read block of BYTEs */
+void retry_read_byteblock(
+	HANDLE fh,
+	BYTE *byteblock,
+	ULONGLONG position,
+	DWORD blocksize
+) {
+	DWORD newread;
+	printf("Warning: could not read, retrying to read block at %llu of %lu bytes (end of target)\n", position, blocksize);
+	for (int cnt=RETRIES; cnt>=1; cnt--) {
+		printf("Retrying %d... \n", cnt);
+		fflush(stdout);
+		set_pointer(fh, position);
+		if ( ReadFile(fh, byteblock, blocksize, &newread, NULL) && newread == blocksize ) return;
+		Sleep(RETRY_SLEEP);
+	}
+	error_stopped(position+newread, fh);
 }
 
 /* Verify bytes by given block size */
 ULONGLONG verify_blocks(
 	HANDLE fh,
 	ULONGLONG written,
-	BYTE zeroff,
+	ULONGLONG position,
 	DWORD blocksize,
+	BYTE zeroff,
 	char *bytesof
 ) {
-	ULONGLONG position = 0;
-	DWORD ullperblock = blocksize >> 3;	// ull in one block = blocksize / 8
-	ULONGLONG ullblock[ullperblock];
-	ULONGLONG tominusblock;
-	ULONGLONG check;
-	memset(&check, zeroff, sizeof(ULONGLONG));
-	DWORD newread;
-	if ( written >= blocksize ) {	// verify blocks
+	if ( written - position >= blocksize ) {
+		DWORD ullperblock = blocksize >> 3;	// ull in one block = blocksize / 8
+		ULONGLONG ullblock[ullperblock];
+		ULONGLONG tominusblock;
+		ULONGLONG check;
+		memset(&check, zeroff, sizeof(ULONGLONG));
+		DWORD newread;
 		tominusblock = written - blocksize;
 		clock_t printclock = clock() + ONESEC;
 		while ( position < tominusblock ) {
-			if ( !ReadFile(fh,
-				ullblock,
-				blocksize,
-				&newread,
-				NULL
-			) || newread != blocksize ) error_stopped(position+newread, fh);
+			if ( !ReadFile(fh, ullblock, blocksize, &newread, NULL ) || newread != blocksize )
+				retry_read_ullblock(fh, ullblock, position, blocksize);
 			for (DWORD p=0; p<ullperblock; p++)
 				if ( ullblock[p] != check ) error_notzero(position + ( p * sizeof(ULONGLONG) ), fh);
 			position += blocksize;
@@ -233,65 +312,46 @@ ULONGLONG verify_blocks(
 			}
 		}
 	}
-	if ( written - position >= MINBLOCKSIZE ) {	// verify minimal block that is left
-		tominusblock = written - MINBLOCKSIZE;
-		ullperblock = MINBLOCKSIZE >> 3;
-		while ( position < tominusblock ) {
-			if ( !ReadFile(fh,
-				ullblock,
-				MINBLOCKSIZE,
-				&newread,
-				NULL
-			) || newread != MINBLOCKSIZE ) error_stopped(position+newread, fh);
-			for (DWORD p=0; p<ullperblock; p++)
-				if ( ullblock[p] != check ) error_notzero(position + ( p * sizeof(ULONGLONG) ), fh);
-			position += MINBLOCKSIZE;
-		}
-		printf("... %llu%s", position, bytesof);
-		fflush(stdout);
-	}
+	return position;
+}
+
+/* Verify bytes by given block size */
+ULONGLONG verify_all(
+	HANDLE fh,
+	ULONGLONG written,
+	DWORD blocksize,
+	BYTE zeroff,
+	char *bytesof
+) {
+	ULONGLONG position = verify_blocks(fh, written, 0, blocksize, zeroff, bytesof);
+	position = verify_blocks(fh, written, position, blocksize, zeroff, bytesof);
 	if ( position < written ) {	// verify less than minimal block - only for files, not disks
 		DWORD bytesleft = (DWORD)(written - position);
 		BYTE byteblock[bytesleft];
-		memset(byteblock, zeroff, bytesleft);
-		if ( !ReadFile(fh,
-			byteblock,
-			bytesleft,
-			&newread,
-			NULL
-		) || newread != bytesleft ) error_stopped(position, fh);
+		DWORD newread;
+		if ( !ReadFile(fh, byteblock, bytesleft, &newread, NULL) || newread != bytesleft )
+			retry_read_byteblock(fh, byteblock, position, bytesleft);
 		for (DWORD p=0; p<bytesleft; p++) if ( byteblock[p] != zeroff ) {
 			fprintf(stderr, "Error: found byte that is not zero at position %lld\n", position+p);
 			error_close(fh);
 		}
 		position += bytesleft;
-		printf("... %llu%s", position, bytesof);
-		fflush(stdout);
 	}
+	printf("... %llu%s", position, bytesof);
+	fflush(stdout);
 	return position;
 }
 
 /* Print block to stdout */
 ULONGLONG print_block(HANDLE fh, ULONGLONG written, ULONGLONG position, BYTE zeroff) {
 	set_pointer(fh, position);
-	BYTE charblock[MINBLOCKSIZE];
+	if ( position >= written ) return written;	// just in case...
+	DWORD blocksize = written - position;
+	if ( blocksize > MINBLOCKSIZE ) blocksize = MINBLOCKSIZE;	// do not show more than 512 bytes
+	BYTE byteblock[blocksize];
 	DWORD newread;
-	if ( written - position >= MINBLOCKSIZE ) {
-		if ( !ReadFile(fh,
-			charblock,
-			MINBLOCKSIZE,
-			&newread,
-			NULL
-		) || newread != MINBLOCKSIZE ) error_stopped(position+newread, fh);
-	} else {	// less than 512 bytes to show
-		DWORD blocksize = written - position;
-		if ( !ReadFile(fh,
-			charblock,
-			blocksize,
-			&newread,
-			NULL
-		) || newread != blocksize ) error_stopped(position+newread, fh);
-	}
+	if ( !ReadFile(fh, byteblock, blocksize, &newread, NULL ) || newread != blocksize )
+		retry_read_byteblock(fh, byteblock, position, blocksize);
 	printf("Bytes %llu - %llu", position, position+newread);
 	int t = 1;
 	BOOL badbyte = FALSE;
@@ -300,36 +360,13 @@ ULONGLONG print_block(HANDLE fh, ULONGLONG written, ULONGLONG position, BYTE zer
 			printf("\n");
 			t = VERIFYPRINTLENGTH;
 		}
-		printf("%02X ", charblock[p]);
-		if ( charblock[p] != zeroff ) badbyte = TRUE;
+		printf("%02X ", byteblock[p]);
+		if ( byteblock[p] != zeroff ) badbyte = TRUE;
 	}
 	printf("\n");
 	fflush(stdout);
 	if ( badbyte ) error_notzero(position, fh);
 	return position + newread;
-}
-
-/* Pretend to Write */
-ULONGLONG dummy_write_blocks(
-	int dummycnt,
-	DWORD dummysleep,
-	ULONGLONG towrite,
-	ULONGLONG written,
-	DWORD blocksize,
-	char *bytesof
-	)
-{
-	clock_t start = clock();
-	while ( written < towrite && dummycnt-- > 1 ) {
-		written += blocksize;
-		if ( written > towrite ) break;
-		Sleep(dummysleep);
-		printf("... %llu%s", written, bytesof);
-		fflush(stdout);
-	}
-	printf("... %llu%s", towrite, bytesof);
-	fflush(stdout);
-	return towrite;
 }
 
 /* Main function - program starts here*/
@@ -384,64 +421,55 @@ int main(int argc, char **argv) {
 	char *bytesof = (char*)malloc(32 * sizeof(char));	//  to print "of ... bytes"
 	sprintf(bytesof, " of %llu bytes\n", towrite);
 	if ( dummy ) {	// dummy mode
-		if ( blocksize == 0 && towrite >= MINCALCSIZE ) {
-			printf("Calculating best block size\n");
-			fflush(stdout);
-			blocksize = MAXBLOCKSIZE;
-			for (DWORD size=blocksize; size>=MINBLOCKSIZE; size=size>>1) {
-				printf("Testing block size %lu bytes\n", size);
-				fflush(stdout);
-				written += blocksize;
-				Sleep(DUMMYSLEEP);
-				printf("... %llu%s", written, bytesof);
-				fflush(stdout);
-			}
-			printf("Using block size %lu bytes\n", blocksize);
+		if ( blocksize == 0 ) blocksize = MAXBLOCKSIZE;
+		printf("Using block size %lu bytes\n", blocksize);
+		clock_t start = clock();
+		int cnt = DUMMYCNT;
+		while ( written < towrite && cnt-- > 1 ) {
+			written += blocksize;
+			if ( written > towrite ) break;
+			Sleep(DUMMYSLEEP);
+			printf("... %llu%s", written, bytesof);
 			fflush(stdout);
 		}
-		blocksize = MAXBLOCKSIZE;
-		written = dummy_write_blocks(DUMMYCNT, DUMMYSLEEP, towrite, written, blocksize, bytesof);
-		if ( xtrasave ) {
-			printf("Pass 2 of 2, writing zeros\n");
-			fflush(stdout);
-			written = dummy_write_blocks(DUMMYCNT, DUMMYSLEEP, towrite, 0, blocksize, bytesof);
-		}
+		written = towrite;
 	} else {	// the real thing starts here
 		DWORD maxblocksize = MAXBLOCKSIZE;
-		if ( blocksize > 0 ) maxblocksize = blocksize; 
+		if ( blocksize > 0 ) maxblocksize = blocksize;
 		BYTE maxblock[maxblocksize];	// generate block to write
 		if ( xtrasave ) for (int i=0; i<maxblocksize; i++) maxblock[i] = (char)rand();
 		else memset(maxblock, zeroff, maxblocksize);
 		if ( blocksize == 0 && towrite >= MINCALCSIZE ) {	// calculate best/fastes block size
-			DWORD newwritten;
+			written = write_to(fh, maxblock, maxblocksize*TESTBLOCKS, written, maxblocksize, bytesof);
 			printf("Calculating best block size\n");
 			fflush(stdout);
-			clock_t bestduration = MAXCLOCK;
-			blocksize = maxblocksize;
-			DWORD size = maxblocksize;
 			clock_t duration;
-			for (DWORD blockstw=MAXCOUNTER; size>=MINBLOCKSIZE; blockstw=blockstw<<1) {	// double blocks
-				printf("Testing block size %lu bytes\n", size);
-				clock_t start = clock();
-				for (DWORD blockcnt=0; blockcnt<blockstw; blockcnt++) {
-					if ( !WriteFile(fh, maxblock, size, &newwritten, NULL)
-						|| newwritten < size ) error_stopped(written+newwritten, fh);
-					written += newwritten;
-				}
-				duration = clock() - start;	// duration of writeprocess
+			clock_t bestduration = MAXCLOCK;
+			int blockstw = TESTBLOCKS;
+			blocksize = MAXBLOCKSIZE;
+			DWORD testsize = blocksize;
+			while ( testsize>=MINBLOCKSIZE ) {
+				printf("Testing block size %lu bytes\n", testsize);
+				duration = write_blocks_timer(fh, maxblock, blockstw, testsize, written);
+				if ( duration < 0 ) written += ( (int)~duration ) * testsize;	// write error
+				else written += blockstw * testsize;
 				printf("... %llu%s", written, bytesof);
 				fflush(stdout);
-				if ( duration < bestduration ) {
-					bestduration = duration;
-					blocksize = size;
+				if ( duration >= 0 ) {
+					if ( duration < bestduration ) {
+						bestduration = duration;
+						blocksize = testsize;
+					} else if ( duration > bestduration ) break;
 				}
-				size = size >> 1;	// size / 2
+				testsize = testsize >> 1;	// testsize / 2
+				blockstw = blockstw << 1;	// double blocks to test
 			}
+			if ( bestduration == MAXCLOCK) blocksize = MINBLOCKSIZE; 	// try minimal block size as backup
 		}  else if ( blocksize == 0 ) blocksize = MAXBLOCKSIZE;
 		printf("Using block size of %lu bytes\n", blocksize);
 		fflush(stdout);
 		/* First pass */
-		written = write_blocks(fh, maxblock, towrite, written, blocksize, bytesof);
+		written = write_to(fh, maxblock, towrite, written, blocksize, bytesof);
 		/* Second passs */
 		if ( xtrasave ) {
 			printf("Pass 2 of 2, writing 0x%02X\n", zeroff);
@@ -453,7 +481,7 @@ int main(int argc, char **argv) {
 				fprintf(stderr, "Error: could not re-open %s\n", argv[1]);
 				exit(1);
 			}
-			written = write_blocks(fh, maxblock, towrite, 0, blocksize, bytesof);
+			written = write_to(fh, maxblock, towrite, 0, blocksize, bytesof);
 		}
 	}
 	close_handle(fh);
@@ -466,7 +494,7 @@ int main(int argc, char **argv) {
 		error_close(fh);
 	}
 	if ( full_verify ) {	// full verify checks every byte
-		ULONGLONG verified = verify_blocks(fh, written, zeroff, blocksize, bytesof);
+		ULONGLONG verified = verify_all(fh, written, blocksize, zeroff, bytesof);
 		printf("Verified %llu bytes\n", verified);
 	}
 	ULONGLONG position = print_block(fh, written, 0, zeroff);	// print first block

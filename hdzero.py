@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 __author__ = 'Markus Thilo'
-__version__ = '1.0.0-0001_2023-01-11'
+__version__ = '1.0.1-0001_2023-01-12'
 __license__ = 'GPL 3'
 __email__ = 'markus.thilo@gmail.com'
 __status__ = 'Release'
@@ -47,7 +47,8 @@ class WinUtils:
 	'Needed Windows functions'
 
 	WINCMD_TIMEOUT = 10
-	WINCMD_RETRIES = 6
+	WINCMD_RETRIES = 60
+	WINCMD_DELAY = 1
 
 	def __init__(self, parentpath, dummy=False):
 		'Generate Windows tools'
@@ -130,7 +131,7 @@ class WinUtils:
 					stillmounted.remove(driveletter)
 			if stillmounted == list():
 				return
-			sleep(self.WINCMD_TIMEOUT)
+			sleep(self.WINCMD_DELAY)
 		return stillmounted
 
 	def run_diskpart(self, script):
@@ -153,11 +154,15 @@ class WinUtils:
 			driveno = driveid[17:]
 		except:
 			return
-		return self.run_diskpart(f'''select disk {driveno}
+		ret = self.run_diskpart(f'''select disk {driveno}
 clean
-list partition
 '''
+#list partition
+#'''
 		)	# list partiton makes shure that the disk is free to write
+		
+		print('DEBUG --- ret:', ret)
+		return ret
 
 	def create_partition(self, driveid, label, letter=None, table='gpt', fs='ntfs'):
 		'Create partition using diskpart'
@@ -186,7 +191,7 @@ assign letter={pure_letter}
 		for cnt in range(self.WINCMD_RETRIES):
 			if Path(letter).exists():
 				return letter
-			sleep(self.WINCMD_TIMEOUT)
+			sleep(self.WINCMD_DELAY)
 
 class Logging:
 	'Log to file'
@@ -226,8 +231,8 @@ class Logging:
 class Gui(CTk, WinUtils, Logging):
 	'GUI look and feel'
 
-	PAD = 8
-	SLIMPAD = 4
+	PAD = 4
+	SLIMPAD = 2
 	LABELWIDTH = 400
 	BARWIDTH = 200
 	BARHEIGHT = 20
