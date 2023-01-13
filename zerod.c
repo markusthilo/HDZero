@@ -1,5 +1,5 @@
-/* zerod v1.0.1_20230112 */
-/* written for Windows + MinGW */
+/* zerod v1.0.1_20230113 */
+/* written for Windows + MinGW-W64 */
 /* Author: Markus Thilo' */
 /* E-mail: markus.thilo@gmail.com */
 /* License: GPL-3 */
@@ -58,26 +58,39 @@ DWORD read_blocksize(char *s) {
 
 /* Open handle to read */
 HANDLE open_handle_write(char *path) {
-	HANDLE fh = CreateFile(
-		path,
-		GENERIC_WRITE,
-		FILE_SHARE_READ | FILE_SHARE_WRITE,
-		NULL,
-		OPEN_EXISTING,
-		0,
-		NULL
-	);
-	if ( fh == INVALID_HANDLE_VALUE ) {
-		fprintf(stderr, "Error: could not open output file or device %s to write\n", path);
-		exit(1);
+	HANDLE fh;
+	for (int cnt=RETRIES; cnt>=0; cnt--) {
+		if ( cnt < RETRIES ) {
+			printf("Retrying %d... \n", cnt+1);
+			fflush(stdout);
+		}
+		fh = CreateFile(
+			path,
+			GENERIC_WRITE,
+			FILE_SHARE_READ | FILE_SHARE_WRITE,
+			NULL,
+			OPEN_EXISTING,
+			0,
+			NULL
+		);
+		if ( fh != INVALID_HANDLE_VALUE ) return fh;
+		if ( cnt > 0 ) Sleep(RETRY_SLEEP);
 	}
-	return fh;
+	fprintf(stderr, "Error: could not open output file or device %s to write\n", path);
+	exit(1);
 }
 
 /* Close handle */
 void close_handle(HANDLE fh) {
 	if ( fh == INVALID_HANDLE_VALUE ) return;
-	if ( CloseHandle(fh) ) return;
+	for (int cnt=RETRIES; cnt>=0; cnt--) {
+		if ( cnt < RETRIES ) {
+			printf("Retrying %d... \n", cnt+1);
+			fflush(stdout);
+		}
+		if ( CloseHandle(fh) ) return;
+		if ( cnt > 0 ) Sleep(RETRY_SLEEP);
+	}
 	fprintf(stderr, "Error: could not close output file or device\n");
 	exit(1);
 }
@@ -90,19 +103,20 @@ void error_close(HANDLE fh) {
 
 /* Get size */
 ULONGLONG get_size(HANDLE fh) {
-	ULONGLONG size;
 	DISK_GEOMETRY_EX dge;		// disk?
-	if ( DeviceIoControl(fh, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, NULL, 0, &dge, sizeof(dge), NULL, NULL) )
-		size = dge.DiskSize.QuadPart;
-	else {	// file?
-		LARGE_INTEGER li_filesize;
-		if ( !GetFileSizeEx(fh, &li_filesize) ) {
-			fprintf(stderr, "Error: could not determin a file or disk to wipe\n");
-			error_close(fh);
+	LARGE_INTEGER li_filesize;	// file?
+	for (int cnt=RETRIES; cnt>=0; cnt--) {
+		if ( cnt < RETRIES ) {
+			printf("Retrying %d... \n", cnt+1);
+			fflush(stdout);
 		}
-		size = li_filesize.QuadPart;
+		if ( DeviceIoControl(fh, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, NULL, 0, &dge, sizeof(dge), NULL, NULL) )
+			return dge.DiskSize.QuadPart;
+		if ( GetFileSizeEx(fh, &li_filesize) ) return li_filesize.QuadPart;
+		if ( cnt > 0 ) Sleep(RETRY_SLEEP);
 	}
-	return size;
+	fprintf(stderr, "Error: could not determin a file or disk to wipe\n");
+	error_close(fh);
 }
 
 /* Open handle to read */
@@ -168,7 +182,7 @@ ULONGLONG retry_write_block(
 		set_pointer(fh, position);
 		if ( WriteFile(fh, maxblock, blocksize, &newwritten, NULL) && newwritten == blocksize )
 			return position + newwritten;
-		Sleep(RETRY_SLEEP);
+		if ( cnt > 1 ) Sleep(RETRY_SLEEP);
 	}
 	error_stopped(position+newwritten, fh);
 }
@@ -257,7 +271,7 @@ void retry_read_ullblock(
 		fflush(stdout);
 		set_pointer(fh, position);
 		if ( ReadFile(fh, ullblock, blocksize, &newread, NULL) && newread == blocksize ) return;
-		Sleep(RETRY_SLEEP);
+		if ( cnt > 1 ) Sleep(RETRY_SLEEP);
 	}
 	error_stopped(position+newread, fh);
 }
@@ -276,7 +290,7 @@ void retry_read_byteblock(
 		fflush(stdout);
 		set_pointer(fh, position);
 		if ( ReadFile(fh, byteblock, blocksize, &newread, NULL) && newread == blocksize ) return;
-		Sleep(RETRY_SLEEP);
+		if ( cnt > 1 ) Sleep(RETRY_SLEEP);
 	}
 	error_stopped(position+newread, fh);
 }
