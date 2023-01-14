@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 __author__ = 'Markus Thilo'
-__version__ = '1.0.1-0001_2023-01-12'
-__license__ = 'GPL 3'
+__version__ = '1.0.1-0001_2023-01-14'
+__license__ = 'GPL-3'
 __email__ = 'markus.thilo@gmail.com'
 __status__ = 'Release'
 __description__ = 'Wipe HDDs'
@@ -154,15 +154,12 @@ class WinUtils:
 			driveno = driveid[17:]
 		except:
 			return
-		ret = self.run_diskpart(f'''select disk {driveno}
+		return self.run_diskpart(f'''select disk {driveno}
 clean
 '''
 #list partition
 #'''
 		)	# list partiton makes shure that the disk is free to write
-		
-		print('DEBUG --- ret:', ret)
-		return ret
 
 	def create_partition(self, driveid, label, letter=None, table='gpt', fs='ntfs'):
 		'Create partition using diskpart'
@@ -512,6 +509,9 @@ class Gui(CTk, WinUtils, Logging):
 		for msg_raw in self.zerod_proc.stdout:
 			msg_split = msg_raw.split()
 			msg = msg_raw.strip()
+			
+			print("DEBUG zerod:", msg)
+			
 			info = None
 			if msg_split[0] == '...':
 				progress_str = files_of_str + pass_of_str + ' '
@@ -538,6 +538,12 @@ class Gui(CTk, WinUtils, Logging):
 			elif msg_split[0] == 'All':
 				info = f'{msg_split[2]} {bytes_str} {were_wiped_str}'
 				self.main_info.set(info)
+			elif msg_split[0] == 'Warning:':
+				info = msg
+				self.main_info.set(info)
+			elif msg_split[0] == 'Retrying':
+				info = msg
+				self.progress_info.set(info)
 			else:
 				info = msg
 			if info and self.options['writelog']:
@@ -595,12 +601,13 @@ class Gui(CTk, WinUtils, Logging):
 		self.workframe(self.conf['TEXT']['wipedrive'])
 		self.head_info.set(self.work_target) 
 		self.main_info.set(self.conf['TEXT']['cleaning_table'])
-		if self.clean_table(self.work_target) != 0:
-			showwarning(title=self.conf['TEXT']['warning_title'],
-				message=self.conf['TEXT']['not_clean_table'] + f' {self.work_target}')
-			self.working = False
-			self.quit_work()
-			return
+		self.clean_table(self.work_target)
+		#if self.clean_table(self.work_target) != 0:
+		#	showwarning(title=self.conf['TEXT']['warning_title'],
+		#		message=self.conf['TEXT']['not_clean_table'] + f' {self.work_target}')
+		#	self.working = False
+		#	self.quit_work()
+		#	return
 		self.zerod_proc = self.zerod_launch(
 			self.work_target,
 			blocksize = self.options['blocksize'],
