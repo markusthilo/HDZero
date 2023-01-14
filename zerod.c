@@ -48,7 +48,7 @@ void print_help() {
 	printf("    /x - 2 pass wipe, blocks with random values as 1st pass\n");
 	printf("    /f - fill with binary ones / 0xff instad of zeros\n");
 	printf("    /v - verify every byte after wipe\n");
-	printf("    /p - only probe if target is writeable\n");
+	printf("    /p - only probe to get size\n");
 	printf("    /d - dummy write (nothing is written but simulets output\n\n");
 	printf("Example:\n");
 	printf("zerod.exe \\\\.\\PHYSICALDRIVE1 /x /v\n\n");
