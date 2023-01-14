@@ -1,8 +1,11 @@
-/* zerod v1.0.1_20230113 */
+/* zerod */
 /* written for Windows + MinGW-W64 */
 /* Author: Markus Thilo' */
 /* E-mail: markus.thilo@gmail.com */
 /* License: GPL-3 */
+
+/* Version */
+const char *VERSION = "1.0.1_20230114";
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -10,7 +13,7 @@
 #include <windows.h>
 #include <winioctl.h>
 
-// Definitions
+/* Definitions */
 const ULONGLONG MAX_LARGE_INTEGER = 0x7fffffffffffffff;
 const clock_t MAXCLOCK = 0x7fffffff;
 const clock_t ONESEC = 1000000 / CLOCKS_PER_SEC;
@@ -23,6 +26,39 @@ const DWORD RETRY_SLEEP = 1000;
 const int VERIFYPRINTLENGTH = 32;
 const DWORD DUMMYSLEEP = 250;
 const int DUMMYCNT = 10;
+
+/* Print help text */
+void print_help() {
+	printf("\n                                       000\n");
+	printf("                                       000\n");
+	printf("                                       000\n");
+	printf("00000000  000000  0000000 000000   0000000\n");
+	printf("   0000  000  000 00000  00000000 0000 000\n");
+	printf("  0000   00000000 000    000  000 000  000\n");
+	printf(" 0000    0000     000    00000000 0000 000\n");
+	printf("00000000  000000  000     000000   0000000\n\n");
+	printf("v%s\n\n", VERSION);
+	printf("Overwrite file or device with zeros\n\n");
+	printf("Usage:\n");
+	printf("zerod.exe TARGET [OPTIONS]\n");
+	printf("or zerod.exe /h for this help\n\n");
+	printf("TARGET:\n");
+	printf("    file or physical drive\n\n");
+	printf("OPTIONS:\n");
+	printf("    /x - 2 pass wipe, blocks with random values as 1st pass\n");
+	printf("    /f - fill with binary ones / 0xff instad of zeros\n");
+	printf("    /v - verify every byte after wipe\n");
+	printf("    /p - only probe if target is writeable\n");
+	printf("    /d - dummy write (nothing is written but simulets output\n\n");
+	printf("Example:\n");
+	printf("zerod.exe \\\\.\\PHYSICALDRIVE1 /x /v\n\n");
+	printf("Disclaimer:\n");
+	printf("The author is not responsible for any loss of data.\n");
+	printf("Obviously, the tool is dangerous as its purpose is to erase data.\n\n");
+	printf("Author: Markus Thilo\n");
+	printf("License: GPL-3\n");
+	printf("See: https://github.com/markusthilo/HDZero\n\n");
+}
 
 /* Print error to stderr and exit */
 void error_toomany() {
@@ -56,7 +92,13 @@ DWORD read_blocksize(char *s) {
 	return r;
 }
 
-/* Open handle to read */
+/* Print error to stderr and exit */
+void error_open(char *path) {
+	fprintf(stderr, "Error: could not open output file or device %s to write\n", path);
+	exit(1);
+}
+
+/* Open file or device to write */
 HANDLE open_handle_write(char *path) {
 	HANDLE fh;
 	for (int cnt=RETRIES; cnt>=0; cnt--) {
@@ -74,10 +116,11 @@ HANDLE open_handle_write(char *path) {
 			NULL
 		);
 		if ( fh != INVALID_HANDLE_VALUE ) return fh;
+		if ( cnt == RETRIES )
+			printf("Warning: could not open output file or device %s to write\n", path);
 		if ( cnt > 0 ) Sleep(RETRY_SLEEP);
 	}
-	fprintf(stderr, "Error: could not open output file or device %s to write\n", path);
-	exit(1);
+	error_open(path);
 }
 
 /* Close handle */
@@ -89,6 +132,8 @@ void close_handle(HANDLE fh) {
 			fflush(stdout);
 		}
 		if ( CloseHandle(fh) ) return;
+		if ( cnt == RETRIES )
+			printf("Warning: could not close output file or device\n");
 		if ( cnt > 0 ) Sleep(RETRY_SLEEP);
 	}
 	fprintf(stderr, "Error: could not close output file or device\n");
@@ -115,34 +160,49 @@ ULONGLONG get_size(HANDLE fh) {
 		if ( GetFileSizeEx(fh, &li_filesize) ) return li_filesize.QuadPart;
 		if ( cnt > 0 ) Sleep(RETRY_SLEEP);
 	}
-	fprintf(stderr, "Error: could not determin a file or disk to wipe\n");
+	fprintf(stderr, "Error: could not determin size a file or disk to wipe\n");
 	error_close(fh);
 }
 
 /* Open handle to read */
 HANDLE open_handle_read(char *path) {
-	HANDLE fh = CreateFile(
-		path,
-		GENERIC_READ,
-		FILE_SHARE_READ,
-		NULL,
-		OPEN_EXISTING,
-		0,
-		NULL
-	);
-	return fh;
+	HANDLE fh;
+	for (int cnt=RETRIES; cnt>=0; cnt--) {
+		if ( cnt < RETRIES ) {
+			printf("Retrying %d... \n", cnt+1);
+			fflush(stdout);
+		}
+		fh = CreateFile(
+			path,
+			GENERIC_READ,
+			FILE_SHARE_READ,
+			NULL,
+			OPEN_EXISTING,
+			0,
+			NULL
+		);
+		if ( fh != INVALID_HANDLE_VALUE ) return fh;
+		if ( cnt == RETRIES )
+			printf("Warning: could not open output file or device %s to read\n", path);
+		if ( cnt > 0 ) Sleep(RETRY_SLEEP);
+	}
+	fprintf(stderr, "Error: could not open output file or device %s to read\n", path);
+	exit(1);
 }
 
+/* Print error to stderr and exit */
 void error_blocksize(HANDLE fh) {
 	fprintf(stderr, "Error: given blocksize is over limit\n");
 	error_close(fh);
 }
 
+/* Print error to stderr and exit */
 void error_stopped(ULONGLONG position, HANDLE fh) {
 	fprintf(stderr, "Error: stopped after %llu bytes\n", position);
 	error_close(fh);
 }
 
+/* Print error to stderr and exit */
 void error_notzero(ULONGLONG position, HANDLE fh) {
 	fprintf(stderr, "Error: found bytes that are not wiped at %llu\n", position);
 	error_close(fh);
@@ -156,15 +216,23 @@ void set_pointer(HANDLE fh, ULONGLONG position) {
 	}
 	LARGE_INTEGER moveto;	// win still is not a real 64 bit system...
 	moveto.QuadPart = position;
-	if ( !SetFilePointerEx(	// jump to position
-		fh,
-		moveto,
-		NULL,
-		FILE_BEGIN
-	) ) {
-		fprintf(stderr, "Error: could not point to position %lld\n", moveto.QuadPart);
-		error_close(fh);
+	for (int cnt=RETRIES; cnt>=0; cnt--) {
+		if ( cnt < RETRIES ) {
+			printf("Retrying %d... \n", cnt+1);
+			fflush(stdout);
+		}
+		if ( SetFilePointerEx(	// jump to position
+			fh,
+			moveto,
+			NULL,
+			FILE_BEGIN
+		) ) return;
+		if ( cnt == RETRIES )
+			printf("Warning: could not point to position %lld\n", moveto.QuadPart);
+		if ( cnt > 0 ) Sleep(RETRY_SLEEP);
 	}
+	fprintf(stderr, "Error: could not point to position %lld\n", moveto.QuadPart);
+	error_close(fh);
 }
 
 /* Retry to write on write errors */
@@ -386,7 +454,14 @@ ULONGLONG print_block(HANDLE fh, ULONGLONG written, ULONGLONG position, BYTE zer
 /* Main function - program starts here*/
 int main(int argc, char **argv) {
 	/* CLI arguments */
+	if  ( argc == 2 && argv[1][2] == 0
+		&& ( argv[1][0] == '/' || argv[1][0] == '-' )
+		&& ( argv[1][1] == 'h' || argv[1][1] == 'H' ) ) {
+		print_help();
+		exit(0);
+	}
 	if ( argc < 2 ) {
+		print_help();
 		fprintf(stderr, "Error: Missing argument(s)\n");
 		exit(1);
 	}
@@ -394,10 +469,10 @@ int main(int argc, char **argv) {
 	DWORD blocksize = 0;	// block size to write
 	BOOL xtrasave = FALSE;	// randomized overwrite
 	BOOL full_verify = FALSE; // to verify every byte
+	BOOL probe_access = FALSE; // only check write access
 	BOOL dummy = FALSE;	// dummy mode
 	DWORD arg_blocksize = 0; // block size 0 = not set
-	int argullcnt = 0;
-	for (int i=2; i<argc; i++) {	// if there are more arguments
+	for (int i=2; i<argc; i++) {
 		if ( argv[i][0] == '/' && argv[i][2] == 0 ) {	// swith?
 			if ( argv[i][1] == 'x' || argv[i][1] == 'X' ) {	// x for two pass mode
 				if ( xtrasave ) error_toomany();
@@ -408,6 +483,9 @@ int main(int argc, char **argv) {
 			} else if ( argv[i][1] == 'v' || argv[i][1] == 'V' ) {	// v for full verify
 				if ( full_verify ) error_toomany();
 				full_verify = TRUE;
+			} else if ( argv[i][1] == 'p' || argv[i][1] == 'P' ) {	// p for probe access
+				if ( argc > 3 ) error_toomany();
+				probe_access  = TRUE;
 			} else if ( argv[i][1] == 'd' || argv[i][1] == 'D' ) {	// d for dummy mode
 				if ( dummy ) error_toomany();
 				dummy = TRUE;
@@ -421,8 +499,26 @@ int main(int argc, char **argv) {
 		}
 	}
 	/* End of CLI */
-	HANDLE fh = open_handle_write(argv[1]);	// open file or drive
+	HANDLE fh;
+	if ( probe_access ) {
+		/* Open file or drive to write using CreateFile */
+		fh = CreateFile(
+			argv[1],
+			GENERIC_WRITE,
+			FILE_SHARE_READ | FILE_SHARE_WRITE,
+			NULL,
+			OPEN_EXISTING,
+			0,
+			NULL
+		);
+		if ( fh == INVALID_HANDLE_VALUE ) error_open(argv[1]);
+	}
+	else fh = open_handle_write(argv[1]);	// open file or drive
 	ULONGLONG towrite = get_size(fh);	// get size of disk or file
+	if ( probe_access ) {
+		printf("All done, detected size of %llu bytes\n", towrite);
+		exit(0);
+	}
 	if ( towrite == 0 ) {
 		printf("All done, 0 bytes to process");
 		exit(0);
