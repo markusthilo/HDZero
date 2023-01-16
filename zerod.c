@@ -5,7 +5,7 @@
 /* License: GPL-3 */
 
 /* Version */
-const char *VERSION = "1.0.1_20230115";
+const char *VERSION = "1.0.1_20230116";
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -14,7 +14,6 @@ const char *VERSION = "1.0.1_20230115";
 #include <winioctl.h>
 
 /* Definitions */
-const ULONGLONG MAX_LARGE_INTEGER = 0x7fffffffffffffff;
 const clock_t MAXCLOCK = 0x7fffffff;
 const clock_t ONESEC = 1000000 / CLOCKS_PER_SEC;
 const DWORD MAXBLOCKSIZE = 0x100000;
@@ -124,17 +123,16 @@ LONGLONG get_size(HANDLE fh) {
 		sizeof(dge),
 		NULL,
 		NULL
-	) )
-		return dge.DiskSize.QuadPart;
+	) ) return dge.DiskSize.QuadPart;
 	if ( GetFileSizeEx(fh, &li_filesize) ) return li_filesize.QuadPart;
 	return -1;
 }
 
 /* Retrie warning and delay */
 void warning_retry(char *warning, int cnt, int attempts) {
-	if ( cnt == 1 )
-		printf("Warning: %s\n", warning);
-	else if ( cnt <= 1 ) {
+	if ( cnt == 0 ) return;
+	if ( cnt == 1 ) printf("Warning: %s\n", warning);
+	if ( cnt >= 1 ) {
 		Sleep(RETRY_SLEEP);
 		printf("Attempt %d of %d\n", cnt, attempts);
 		fflush(stdout);
@@ -151,11 +149,11 @@ typedef struct Z_TARGET {
 /* Open target, get size and write first block */
 Z_TARGET open_write_target(char *path, BYTE *byteblock, DWORD blocksize) {
 	Z_TARGET target;
-	char warning[sizeof(path)+24];
+	char warning[sizeof(path)+32];
 	sprintf(warning, "could not open %s to write", path);
 	DWORD newwritten;
 	for (int cnt=0; cnt<=RETRIES; cnt++) {
-		warning_retry(warning, cnt, RETRIES)
+		warning_retry(warning, cnt, RETRIES);
 		target.Handle = open_handle_write(path);
 		if ( target.Handle == INVALID_HANDLE_VALUE ) continue;
 		target.Size = get_size(target.Handle);
@@ -172,17 +170,17 @@ Z_TARGET open_write_target(char *path, BYTE *byteblock, DWORD blocksize) {
 		}
 	}
 	fprintf(stderr, "Error: could not open %s to write\n", path);
-	close_handle(target.Handle)
+	close_handle(target.Handle);
 	exit(1);
 }
 
 /* Open handle to read */
 Z_TARGET open_read_target(char *path) {
 	Z_TARGET target;
-	char warning[sizeof(path)+24];
+	char warning[sizeof(path)+32];
 	sprintf(warning, "could not open %s to read", path);
 	for (int cnt=0; cnt<=RETRIES; cnt++) {
-		warning_retry(warning, cnt, RETRIES)
+		warning_retry(warning, cnt, RETRIES);
 		target.Handle = open_handle_read(path);
 		if ( target.Handle == INVALID_HANDLE_VALUE ) continue;
 		target.Size = get_size(target.Handle);
@@ -192,7 +190,7 @@ Z_TARGET open_read_target(char *path) {
 		}
 	}
 	fprintf(stderr, "Error: could not open %s to read\n", path);
-	close_handle(target.Handle)
+	close_handle(target.Handle);
 	exit(1);
 }
 
@@ -209,9 +207,9 @@ void set_pointer(Z_TARGET target) {
 	LARGE_INTEGER moveto;	// win still is not a real 64 bit system...
 	moveto.QuadPart = target.Pointer;
 	char warning[64];
-	warning = sprintf(warning, "could not point to position %lld", target.Pointer);
+	sprintf(warning, "could not point to position %lld", target.Pointer);
 	for (int cnt=0; cnt<=RETRIES; cnt++) {
-		warning_retry(warning, cnt, RETRIES)
+		warning_retry(warning, cnt, RETRIES);
 		if ( SetFilePointerEx(	// jump to position
 			target.Handle,
 			moveto,
@@ -227,7 +225,7 @@ void set_pointer(Z_TARGET target) {
 /* Retry to write on errors */
 Z_TARGET retry_write_block(Z_TARGET target, BYTE *byteblock, DWORD blocksize) {
 	char warning[96];
-	warning = sprintf(
+	sprintf(
 		warning,
 		"could not write, retrying to write block at %lld of %lu bytes",
 		target.Pointer, 
@@ -235,7 +233,7 @@ Z_TARGET retry_write_block(Z_TARGET target, BYTE *byteblock, DWORD blocksize) {
 	);
 	DWORD newwritten;
 	for (int cnt=1; cnt<=RETRIES; cnt++) {
-		warning_retry(warning, cnt, RETRIES)
+		warning_retry(warning, cnt, RETRIES);
 		set_pointer(target);
 		if ( WriteFile(
 			target.Handle,
@@ -266,7 +264,7 @@ Z_TARGET write_blocks(Z_TARGET target, BYTE *byteblock, DWORD blocksize, int blo
 		else tominusblock = target.Pointer + ( blocksize * blockstw );
 		DWORD newwritten;
 		clock_t printclock = clock() + ONESEC;
-		while ( target.Pointer < tominusblock ) {	// write blocks
+		while ( target.Pointer <= tominusblock ) {	// write blocks
 			if ( !WriteFile(
 				target.Handle,
 				byteblock,
@@ -274,10 +272,10 @@ Z_TARGET write_blocks(Z_TARGET target, BYTE *byteblock, DWORD blocksize, int blo
 				&newwritten,
 				NULL
 			) || newwritten < blocksize )
-				target = retry_write_block(taregt, maxblock, blocksize);
+				target = retry_write_block(target, byteblock, blocksize);
 			else target.Pointer += newwritten;
 			if ( clock() >= printclock ) {
-				printf("... %lld%s", written, bytesof);
+				printf("... %lld%s", target.Pointer, bytesof);
 				fflush(stdout);
 				printclock = clock() + ONESEC;
 			}
@@ -288,31 +286,12 @@ Z_TARGET write_blocks(Z_TARGET target, BYTE *byteblock, DWORD blocksize, int blo
 
 /* Write from position to end of target */
 Z_TARGET write_to_end(Z_TARGET target, BYTE *byteblock, DWORD blocksize) {
-	target = write_blocks(target, byteblock, blocksize);	// write full block size
-	target = write_blocks(target, byteblock, MINBLOCKSIZE);	// write minimal full blocks
-	target = target = write_blocks(target, byteblock, (DWORD)(target.Size-target.Position));	// whats's left
-	printf("... %lld%s of %lld bytes\n", target.Pointer, target.Size);
+	target = write_blocks(target, byteblock, blocksize, -1);	// write full block size
+	target = write_blocks(target, byteblock, MINBLOCKSIZE, -1);	// write minimal full blocks
+	target = write_blocks(target, byteblock, (DWORD)(target.Size-target.Pointer), -1);
+	printf("... %lld of %lld bytes\n", target.Pointer, target.Size);
 	fflush(stdout);
 	return target;
-}
-
-/* Write by given block size and easure the time needed */
-clock_t write_blocks_timer(Z_TARGET target, BYTE *bytelock, DWORD blocksize, int blockstw) {
-	DWORD newwritten;
-	clock_t start = clock();	// get start time
-	for (int blockcnt=0; blockcnt<blockstw; blockcnt++) {
-		if ( !WriteFile(
-			target.Handle,
-			byteblock,
-			blocksize,
-			&newwritten,
-			NULL
-		) || newwritten < blocksize ) {
-			set_pointer(target);	// ...go back to last correct block
-			return ~blockcnt;	// return negative blocks on write error
-		}
-	}
-	return clock() - start;	// return duration of writeprocess
 }
 
 /* Print error to stderr and exit */
@@ -332,7 +311,7 @@ void error_notzero(Z_TARGET target, DWORD offset) {
 /* Retry to read block of ULONGLONGs */
 Z_TARGET retry_read_ullblock(Z_TARGET target, ULONGLONG *ullblock, DWORD blocksize) {
 	char warning[96];
-	warning = sprintf(
+	sprintf(
 		warning,
 		"could not read, retrying to read block at %lld of %lu bytes",
 		target.Pointer, 
@@ -340,11 +319,43 @@ Z_TARGET retry_read_ullblock(Z_TARGET target, ULONGLONG *ullblock, DWORD blocksi
 	);
 	DWORD newread;
 	for (int cnt=1; cnt<=RETRIES; cnt++) {
-		warning_retry(warning, cnt, RETRIES)
+		warning_retry(warning, cnt, RETRIES);
 		set_pointer(target);
 		if ( ReadFile(
 			target.Handle,
 			ullblock,
+			blocksize,
+			&newread,
+			NULL
+		) && newread == blocksize ) {
+			target.Pointer += newread;	
+			return target;
+		}
+	}
+	fprintf(stderr, "Error: could not read block at %lld of %lu bytes",
+		target.Pointer, 
+		blocksize
+	);
+	close_target(target);
+	exit(1);
+}
+
+/* Retry to read block of BYTEs */
+Z_TARGET retry_read_byteblock(Z_TARGET target, BYTE *byteblock, DWORD blocksize) {
+	char warning[96];
+	sprintf(
+		warning,
+		"could not read, retrying to read block at %lld of %lu bytes",
+		target.Pointer, 
+		blocksize
+	);
+	DWORD newread;
+	for (int cnt=1; cnt<=RETRIES; cnt++) {
+		warning_retry(warning, cnt, RETRIES);
+		set_pointer(target);
+		if ( ReadFile(
+			target.Handle,
+			byteblock,
 			blocksize,
 			&newread,
 			NULL
@@ -366,70 +377,47 @@ Z_TARGET verify_blocks(Z_TARGET target, DWORD blocksize, BYTE zeroff) {
 	if ( blocksize > 0 && target.Size - target.Pointer >= blocksize ) {
 		char bytesof[32];	//  to print "of ... bytes"
 		sprintf(bytesof, " of %lld bytes\n", target.Size);
-		if ( blocksize >= MINBLOCKSIZE ) {	// full block sizes
+		if ( blocksize >= MINBLOCKSIZE ) {	// full block size
+			ULONGLONG *ullblock = malloc(blocksize);
 			DWORD ullperblock = blocksize >> 3;	// ull in one block = blocksize / 8
-			ULONGLONG ullblock[ullperblock];
 			ULONGLONG check;
 			memset(&check, zeroff, sizeof(ULONGLONG));
 			DWORD newread;
-			LONGLONG tominusblock = written - blocksize;
+			LONGLONG tominusblock = target.Size - blocksize;
 			clock_t printclock = clock() + ONESEC;
-			while ( target.Pointer < tominusblock ) {
+			while ( target.Pointer <= tominusblock ) {
 				if ( !ReadFile(
 					target.Handle,
 					ullblock,
 					blocksize,
 					&newread,
 					NULL
-				) || newread != blocksize )
-					retry_read_ullblock(target, ullblock, blocksize);
+				) || newread != blocksize ) retry_read_ullblock(target, ullblock, blocksize);
 				for (DWORD p=0; p<ullperblock; p++)
 					if ( ullblock[p] != check ) error_notzero(target, p * sizeof(ULONGLONG) );
-				target.Pointer += blocksize;
+				target.Pointer += newread;
 				if ( clock() >= printclock ) {
-					printf("... %llu%s", position, bytesof);
+					printf("... %llu%s", target.Pointer, bytesof);
 					fflush(stdout);
 					printclock = clock() + ONESEC;
 				}
 			}
 		} else {	// check the bytes left
-			DWORD bytesleft = (DWORD)(target.Size - target.Pointer);
-			BYTE byteblock[bytesleft];
+			blocksize = target.Size - target.Pointer;
+			BYTE *byteblock = malloc(blocksize);
 			DWORD newread;
-			char warning[64];
-			warning = sprintf(
-				warning,
-				"could not read block at %lld of %lu bytes",
-				target.Pointer,
-				blocksize
-			);
-			int cnt=0;
-			while ( TRUE ) {
-				warning_retry(warning, cnt, RETRIES)
-				if ( ReadFile(
-					target.Handle,
-					ullblock,
-					blocksize,
-					&newread,
-					NULL
-				) && newread == bytesleft ) break;
-				if ( ++cnt > RETRIES ) error_read(target, blocksize);
-			}
-			for (DWORD p=0; p<bytesleft; p++)
+			if ( !ReadFile(
+				target.Handle,
+				byteblock,
+				blocksize,
+				&newread,
+				NULL
+			) || newread != blocksize ) retry_read_byteblock(target, byteblock, blocksize);
+			for (DWORD p=0; p<blocksize; p++)
 				if ( byteblock[p] != zeroff ) error_notzero(target, p);
-			target.Pointer += blocksize;
+			target.Pointer += newread;
 		}
 	}
-	return target;
-}
-
-/* Verify bytes by given block size */
-Z_TARGET verify_all(Z_TARGET target, DWORD blocksize, BYTE zeroff) {
-	target = verify_blocks(target, blocksize, zeroff);
-	target = verify_blocks(target, MINBLOCKSIZE, zeroff);
-	target = verify_blocks(target, (DWORD)(target.Size-target.Position), zeroff);
-	printf("... %lld%s of %lld bytes\n", target.Pointer, target.Size);
-	fflush(stdout);
 	return target;
 }
 
@@ -514,7 +502,7 @@ int main(int argc, char **argv) {
 				full_verify = TRUE;
 			} else if ( argv[i][1] == 'p' || argv[i][1] == 'P' ) {	// p for probe access
 				if ( argc > 3 ) error_toomany();
-				probe_access  = TRUE;
+				print_size = TRUE;
 			} else error_wrong(argv[i]);
 		} else {	// not a swtich, may be blocksize?
 			arg_blocksize = read_blocksize(argv[i]);
@@ -542,7 +530,7 @@ int main(int argc, char **argv) {
 	/* Main task */
 	DWORD maxblocksize = MAXBLOCKSIZE;
 	if ( blocksize > 0 ) maxblocksize = blocksize;
-	BYTE byteblock[maxblocksize];	// generate block to write
+	BYTE *byteblock = malloc(maxblocksize);	// generate block to write
 	if ( xtrasave ) {
 		 for (int i=0; i<maxblocksize; i++) byteblock[i] = (char)rand();
 		 printf("Pass 1 of 2, writing random bytes\n");
@@ -553,27 +541,38 @@ int main(int argc, char **argv) {
 	fflush(stdout);	// spent one day finding out that this is needed for windows stdout
 	Z_TARGET target = open_write_target(argv[1], byteblock, blocksize);
 	if ( blocksize == 0 && target.Size >= MINCALCSIZE ) {	// calculate best/fastes block size
-		target = write_blocks(target, byteblock, blocksize, TESTBLOCKS)
+		blocksize = MAXBLOCKSIZE;
+		int blockstw = TESTBLOCKS;
+		target = write_blocks(target, byteblock, blocksize, blockstw);	// wipe some blocks before test
 		printf("Calculating best block size\n");
 		fflush(stdout);
-		clock_t duration;
+		clock_t start, duration;
 		clock_t bestduration = MAXCLOCK;
-		int blockstw = TESTBLOCKS;
-		blocksize = MAXBLOCKSIZE;
 		DWORD testsize = blocksize;
+		DWORD newwritten;
 		while ( testsize>=MINBLOCKSIZE ) {
 			printf("Testing block size %lu bytes\n", testsize);
-			duration = write_blocks_timer(target, byteblock, testsize, blockstw);
-			if ( duration < 0 ) target.Pointer += ( (int)~duration ) * testsize;	// write error
-			else target.Pointer += blockstw * testsize;
-			printf("... %lld%s of %lld bytes\n", target.Pointer, target.Size);
-			fflush(stdout);
-			if ( duration >= 0 ) {
-				if ( duration < bestduration ) {
-					bestduration = duration;
-					blocksize = testsize;
-				} else if ( duration > bestduration ) break;
+			start = clock();	// get start time
+			for (int blockcnt=0; blockcnt<blockstw; blockcnt++) {
+				if ( !WriteFile(
+					target.Handle,
+					byteblock,
+					testsize,
+					&newwritten,
+					NULL
+				) || newwritten < testsize ) {
+					set_pointer(target);	// on write error go back to last correct block
+					duration = MAXCLOCK;
+					break;
+				} else target.Pointer += newwritten;
 			}
+			duration = clock() - start;
+			printf("... %lld of %lld bytes\n", target.Pointer, target.Size);
+			fflush(stdout);
+			if ( duration < bestduration ) {
+				bestduration = duration;
+				blocksize = testsize;
+			} else if ( duration > bestduration ) break;
 			testsize = testsize >> 1;	// testsize / 2
 			blockstw = blockstw << 1;	// double blocks to test
 		}
@@ -587,19 +586,24 @@ int main(int argc, char **argv) {
 	if ( xtrasave ) {
 		printf("Pass 2 of 2, writing 0x%02X\n", zeroff);
 		fflush(stdout);
-		memset(maxblock, zeroff, maxblocksize);
-		close_target(target);	// close...
-		target = open_write_target(argv[1], byteblock, blocksize);	// ...and open again for second pass
+		memset(byteblock, zeroff, maxblocksize);
+		target.Pointer = 0;
+		set_pointer(target);
 		target = write_to_end(target, byteblock, blocksize);
 	}
+	free(byteblock);
 	close_target(target);
 	/* Verify */
 	printf("Verifying %s\n", argv[1]);
 	fflush(stdout);
 	target = open_read_target(argv[1]);	// open file or drive to verify
 	if ( full_verify ) {	// full verify checks every byte
-		target = verify_all(target, blocksize, zeroff);
-		printf("Verified %llu bytes\n", target.Pointer);
+		target = verify_blocks(target, blocksize, zeroff);
+		target = verify_blocks(target, MINBLOCKSIZE, zeroff);
+		target = verify_blocks(target, (DWORD)(target.Size-target.Pointer), zeroff);
+		printf("... %lld of %lld bytes\n", target.Pointer, target.Size);
+		printf("Verified all %lld bytes\n", target.Pointer);
+		fflush(stdout);
 	}
 	target.Pointer = 0;	// print first block
 	target = print_block(target, zeroff);
