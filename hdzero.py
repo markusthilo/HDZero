@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 __author__ = 'Markus Thilo'
-__version__ = '1.0.1-0001_2023-01-14'
+__version__ = '1.0.1-0001_2023-01-17'
 __license__ = 'GPL-3'
 __email__ = 'markus.thilo@gmail.com'
 __status__ = 'Release'
@@ -46,17 +46,13 @@ class Config(ConfigParser):
 class WinUtils:
 	'Needed Windows functions'
 
-	WINCMD_TIMEOUT = 10
-	WINCMD_RETRIES = 60
+	WINCMD_TIMEOUT = 20
+	WINCMD_RETRIES = 20
 	WINCMD_DELAY = 1
 
-	def __init__(self, parentpath, dummy=False):
+	def __init__(self, parentpath):
 		'Generate Windows tools'
 		self.conn = WMI()
-		if dummy == True or dummy.lower() in ('true', 'yes', 'enabled'):
-			self.dummy_mode = True
-		else:
-			self.dummy_mode = False
 		self.cmd_startupinfo = STARTUPINFO()
 		self.cmd_startupinfo.dwFlags |= STARTF_USESHOWWINDOW
 		self.tmpscriptpath = parentpath/f'_diskpart_script_{GetCurrentProcessId()}.tmp'
@@ -90,9 +86,16 @@ class WinUtils:
 			cmd.append('/f')
 		if verify:
 			cmd.append('/v')
-		if self.dummy_mode:
-			cmd.append('/d')
 		return self.cmd_launch(cmd)
+
+	def zerod_get_size(self, targetpath):
+		'Use zerod.exe toget file or disk size'
+		proc = self.cmd_launch([self.zerod_path, targetpath, '/p'])
+		proc.wait(timeout=self.WINCMD_TIMEOUT)
+		try:
+			return proc.stdout.read().split()[4]
+		except:
+			return
 
 	def is_user_an_admin(self):
 		'True if current User has Admin rights'
@@ -248,16 +251,15 @@ class Gui(CTk, WinUtils, Logging):
 		self.__file_parentpath__ = Path(__file__).parent
 		self.conf = Config(self.__file_parentpath__/'hdzero.conf')
 		self.conf.read()
-		WinUtils.__init__(self, self.__file_parentpath__, dummy=self.conf['DEBUG']['dummy'])
+		WinUtils.__init__(self, self.__file_parentpath__)
 		self.i_am_admin = self.is_user_an_admin()
 		Logging.__init__(self, self.__file_parentpath__)
 		CTk.__init__(self)
 		set_appearance_mode(self.conf['APPEARANCE']['mode'])
 		set_default_color_theme(self.conf['APPEARANCE']['color_theme'])
-		self.title(self.conf['TEXT']['title'] + f' {__version__}')
+		self.title(self.conf['TEXT']['title'] + f' v{__version__}')
 		self.app_icon = PhotoImage(file=self.__file_parentpath__/'icon.png')
 		self.iconphoto(False, self.app_icon)
-
 		if not self.i_am_admin and askquestion(
 			self.conf['TEXT']['warning_title'],
 			self.conf['TEXT']['notadmin']
@@ -265,8 +267,6 @@ class Gui(CTk, WinUtils, Logging):
 			self.abort = True
 		else:
 			self.abort = False
-			if self.dummy_mode:
-				showwarning(title = self.conf['TEXT']['warning_title'], message = 'DUMMY MODE!!!')
 			self.mainframe_user_opts = dict()
 			self.mainframe()
 
@@ -367,8 +367,10 @@ class Gui(CTk, WinUtils, Logging):
 					else:
 						label = CTkLabel(frame, text=letter, width=self.LETTERWIDTH)
 				label.pack(padx=self.PAD, pady=self.SLIMPAD, side='left')
-				CTkLabel(frame, text=f'{drive.Caption}, {drive.MediaType} ({self.readable(drive.Size)})').pack(
-					padx=self.PAD, pady=self.SLIMPAD, anchor='w')
+				CTkLabel(
+					frame,
+					text=f'{drive.Caption}, {drive.MediaType} ({self.readable(self.zerod_get_size(drive.DeviceID))})'
+				).pack(padx=self.PAD, pady=self.SLIMPAD, anchor='w')	
 		### WIPE FILE(S) ###
 		self.file_frame = CTkFrame(self.main_frame)
 		self.file_frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
@@ -391,10 +393,8 @@ class Gui(CTk, WinUtils, Logging):
 		frame = CTkFrame(frame)
 		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
 		self.mainframe_user_opts['extra'] = BooleanVar(value=self.conf['DEFAULT']['extra'])
-
 		CTkCheckBox(master=frame, text=self.conf['TEXT']['extra'], variable=self.mainframe_user_opts['extra'],
 			onvalue=True, offvalue=False).pack(padx=self.PAD, pady=self.PAD, side='left')
-
 		self.mainframe_user_opts['writeff'] = BooleanVar(value=self.conf['DEFAULT']['writeff'])
 		CTkCheckBox(master=frame, text=self.conf['TEXT']['writeff'], variable=self.mainframe_user_opts['writeff'],
 			onvalue=True, offvalue=False).pack(padx=self.PAD, pady=self.PAD, side='left')
@@ -509,9 +509,9 @@ class Gui(CTk, WinUtils, Logging):
 		for msg_raw in self.zerod_proc.stdout:
 			msg_split = msg_raw.split()
 			msg = msg_raw.strip()
-			
+			####################################################################################
 			print("DEBUG zerod:", msg)
-			
+			####################################################################################
 			info = None
 			if msg_split[0] == '...':
 				progress_str = files_of_str + pass_of_str + ' '
@@ -565,7 +565,7 @@ class Gui(CTk, WinUtils, Logging):
 			else:
 				mounted += f'\n\n{part.Dependent.DeviceID}\n'
 			mounted += f'{part.Antecedent.DeviceID}\n{part.Dependent.Description}\n'
-			mounted += self.readable(part.Dependent.Size)
+			mounted += self.readable(self.zerod_get_size(part.Antecedent.DeviceID))
 		if mounted != '':
 			question += self.conf['TEXT']['mounted'] + mounted
 		else:
@@ -618,7 +618,7 @@ class Gui(CTk, WinUtils, Logging):
 		self.watch_zerod()
 		if not self.working:
 			return
-		if self.zerod_proc.wait() != 0 and not self.dummy_mode:
+		if self.zerod_proc.wait() != 0:
 			showerror(
 				self.conf['TEXT']['error'],
 				self.conf['TEXT']['errorwhile'] + f' {self.work_target} \n\n {self.zerod_proc.stderr.read()}'

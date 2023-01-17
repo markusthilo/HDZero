@@ -5,7 +5,7 @@
 /* License: GPL-3 */
 
 /* Version */
-const char *VERSION = "1.0.1_20230116";
+const char *VERSION = "1.0.1_2023011/";
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -39,11 +39,13 @@ void print_help() {
 	printf("v%s\n\n", VERSION);
 	printf("Overwrite file or device with zeros\n\n");
 	printf("Usage:\n");
-	printf("zerod.exe TARGET [OPTIONS]\n");
+	printf("zerod.exe TARGET [BLOCK_SIZE] [OPTIONS]\n");
 	printf("or zerod.exe /h for this help\n\n");
 	printf("TARGET:\n");
 	printf("    file or physical drive\n\n");
-	printf("OPTIONS:\n");
+	printf("BLOCK_SIZE (optional):\n");
+	printf("    size of blocks to write\n\n");
+	printf("OPTIONS (optional):\n");
 	printf("    /x - 2 pass wipe, blocks with random values as 1st pass\n");
 	printf("    /f - fill with binary ones / 0xff instad of zeros\n");
 	printf("    /v - verify every byte after wipe\n");
@@ -151,25 +153,42 @@ Z_TARGET open_write_target(char *path, BYTE *byteblock, DWORD blocksize) {
 	Z_TARGET target;
 	char warning[sizeof(path)+32];
 	sprintf(warning, "could not open %s to write", path);
+	BOOL error_open = FALSE;	// give exact error
+	BOOL error_size = FALSE;
+	BOOL error_write = FALSE;
+	LARGE_INTEGER li_zero;	// win still is not a real 64 bit system...
+	li_zero.QuadPart = 0;
 	DWORD newwritten;
 	for (int cnt=0; cnt<=RETRIES; cnt++) {
 		warning_retry(warning, cnt, RETRIES);
 		target.Handle = open_handle_write(path);
-		if ( target.Handle == INVALID_HANDLE_VALUE ) continue;
+		if ( target.Handle == INVALID_HANDLE_VALUE ) {
+			error_open = TRUE;
+			continue;
+		} else error_open = FALSE;
 		target.Size = get_size(target.Handle);
-		if ( target.Size < 0 ) continue;
-		if ( WriteFile(
+		if ( target.Size < 0 ) {
+			error_size = TRUE;
+			continue;
+		} else error_size = FALSE;
+		if ( !WriteFile(
 			target.Handle,
 			byteblock,
 			blocksize,
 			&newwritten,
 			NULL
-		) && newwritten == blocksize ) {
+		) || newwritten != blocksize ) {
+			SetFilePointerEx(target.Handle, li_zero, NULL, FILE_BEGIN);
+			error_write = TRUE;
+		} else {
 			target.Pointer = newwritten;
 			return target;
 		}
 	}
-	fprintf(stderr, "Error: could not open %s to write\n", path);
+	fprintf(stderr, "Error: ");
+	if ( error_open ) fprintf(stderr, "could not open %s\n", path);
+	if ( error_size ) fprintf(stderr, "could not get size of %s\n", path);
+	if ( error_write ) fprintf(stderr, "could not write to %s\n", path);
 	close_handle(target.Handle);
 	exit(1);
 }
@@ -539,11 +558,10 @@ int main(int argc, char **argv) {
 		printf("Pass 1 of 1, writing 0x%02X\n", zeroff);
 	}
 	fflush(stdout);	// spent one day finding out that this is needed for windows stdout
-	Z_TARGET target = open_write_target(argv[1], byteblock, blocksize);
+	Z_TARGET target = open_write_target(argv[1], byteblock, maxblocksize);
 	if ( blocksize == 0 && target.Size >= MINCALCSIZE ) {	// calculate best/fastes block size
 		blocksize = MAXBLOCKSIZE;
 		int blockstw = TESTBLOCKS;
-		target = write_blocks(target, byteblock, blocksize, blockstw);	// wipe some blocks before test
 		printf("Calculating best block size\n");
 		fflush(stdout);
 		clock_t start, duration;
