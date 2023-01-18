@@ -71,28 +71,16 @@ typedef struct Z_TARGET {
 
 /* Close target */
 void close_target(Z_TARGET target) {
-	if ( target.Type == TTYPE_DISK ) {
-		if ( !DeviceIoControl(
-			target.Handle,
-			FSCTL_UNLOCK_VOLUME,
-			NULL,
-			0,
-			NULL,
-			0,
-			NULL,
-			NULL
-		) ) fprintf(stderr, "Error: could not unlock %s\n", target.Path);
-		if ( !DeviceIoControl(
-			target.Handle,
-			IOCTL_DISK_UPDATE_PROPERTIES,
-			NULL,
-			0,
-			NULL,
-			0,
-			NULL,
-			NULL
-		) ) fprintf(stderr, "Error: could not update %s\n", target.Path);
-	}
+	if ( target.Type == TTYPE_DISK && !DeviceIoControl(
+		target.Handle,
+		IOCTL_DISK_UPDATE_PROPERTIES,
+		NULL,
+		0,
+		NULL,
+		0,
+		NULL,
+		NULL
+	) ) printf("Warning: could not update %s\n", target.Path);
 	if ( !CloseHandle(target.Handle) ) {
 		fprintf(stderr, "Error: could not close %s\n", target.Path);
 		exit(1);
@@ -499,19 +487,6 @@ int main(int argc, char **argv) {
 			target.Type = TTYPE_DISK;
 		} else {
 			fprintf(stderr, "Error: could not determin size or type of %s\n", target.Path);
-			exit(1);
-		}
-		if ( !DeviceIoControl(
-			target.Handle,
-			FSCTL_LOCK_VOLUME,
-			NULL,
-			0,
-			NULL,
-			0,
-			NULL,
-			NULL
-		) ) {
-			fprintf(stderr, "Error: could not lock %s\n", target.Path);
 			exit(1);
 		}
 		if ( !DeviceIoControl(
