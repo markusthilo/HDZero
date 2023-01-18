@@ -5,7 +5,7 @@
 /* License: GPL-3 */
 
 /* Version */
-const char *VERSION = "1.0.1_2023011/";
+const char *VERSION = "1.0.1_20230118/";
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -14,6 +14,8 @@ const char *VERSION = "1.0.1_2023011/";
 #include <winioctl.h>
 
 /* Definitions */
+const int TTYPE_DISK = 1;	// types of targets
+const int TTYPE_FILE = 2;
 const clock_t MAXCLOCK = 0x7fffffff;
 const clock_t ONESEC = 1000000 / CLOCKS_PER_SEC;
 const DWORD MAXBLOCKSIZE = 0x100000;
@@ -23,8 +25,6 @@ const ULONGLONG MINCALCSIZE = 0x100000000;
 const int RETRIES = 20;
 const DWORD RETRY_SLEEP = 1000;
 const int VERIFYPRINTLENGTH = 32;
-const DWORD DUMMYSLEEP = 250;
-const int DUMMYCNT = 10;
 
 /* Print help text */
 void print_help() {
@@ -60,74 +60,43 @@ void print_help() {
 	printf("See: https://github.com/markusthilo/HDZero\n\n");
 }
 
-/* Convert string to DWORD for block size as cli argument */
-DWORD read_blocksize(char *s) {
-	int p = 0;
-	while ( TRUE ) {
-		if ( s[p] == 0 ) break;
-		if ( s[p] < '0' || s[p] > '9' ) return 0;	// return 0 if not a number
-		p++;
+/* Define what you need to work with the target (file or device) */
+typedef struct Z_TARGET {
+	char *Path;	// string with path to device or file
+    HANDLE Handle;	// handle for win api
+	LONGLONG Pointer;	// working here
+	LONGLONG Size;	// the full size to work
+	int Type;	// disk: 1, file: 2, error: -1
+} Z_TARGET;
+
+/* Close target */
+void close_target(Z_TARGET target) {
+	if ( target.Type == TTYPE_DISK ) {
+		if ( !DeviceIoControl(
+			target.Handle,
+			FSCTL_UNLOCK_VOLUME,
+			NULL,
+			0,
+			NULL,
+			0,
+			NULL,
+			NULL
+		) ) fprintf(stderr, "Error: could not unlock %s\n", target.Path);
+		if ( !DeviceIoControl(
+			target.Handle,
+			IOCTL_DISK_UPDATE_PROPERTIES,
+			NULL,
+			0,
+			NULL,
+			0,
+			NULL,
+			NULL
+		) ) fprintf(stderr, "Error: could not update %s\n", target.Path);
 	}
-	DWORD f = 1;
-	DWORD r = 0;
-	DWORD n;
-	while ( --p >= 0 ) {
-		n = r + ( f * (s[p]-'0') );
-		if ( n < r ) return 0;	// in case given size is too large
-		r = n;
-		f *= 10;
+	if ( !CloseHandle(target.Handle) ) {
+		fprintf(stderr, "Error: could not close %s\n", target.Path);
+		exit(1);
 	}
-	return r;
-}
-
-/* Open file or device to write */
-HANDLE open_handle_write(char *path) {
-	return CreateFile(
-		path,
-		GENERIC_WRITE,
-		FILE_SHARE_READ | FILE_SHARE_WRITE,
-		NULL,
-		OPEN_EXISTING,
-		0,
-		NULL
-	);
-}
-
-/* Open file or device to read */
-HANDLE open_handle_read(char *path) {
-	return CreateFile(
-		path,
-		GENERIC_READ,
-		FILE_SHARE_READ,
-		NULL,
-		OPEN_EXISTING,
-		0,
-		NULL
-	);
-}
-
-/* Close handle */
-BOOL close_handle(HANDLE fh) {
-	if ( fh == INVALID_HANDLE_VALUE || CloseHandle(fh) ) return TRUE;
-	return FALSE;
-}
-
-/* Get size */
-LONGLONG get_size(HANDLE fh) {
-	DISK_GEOMETRY_EX dge;		// disk?
-	LARGE_INTEGER li_filesize;	// file?
-	if ( DeviceIoControl(
-		fh,
-		IOCTL_DISK_GET_DRIVE_GEOMETRY_EX,
-		NULL,
-		0,
-		&dge,
-		sizeof(dge),
-		NULL,
-		NULL
-	) ) return dge.DiskSize.QuadPart;
-	if ( GetFileSizeEx(fh, &li_filesize) ) return li_filesize.QuadPart;
-	return -1;
 }
 
 /* Retrie warning and delay */
@@ -138,86 +107,6 @@ void warning_retry(char *warning, int cnt, int attempts) {
 		Sleep(RETRY_SLEEP);
 		printf("Attempt %d of %d\n", cnt, attempts);
 		fflush(stdout);
-	}
-}
-
-/* Define what you need to work with the target (file or device) */
-typedef struct Z_TARGET {
-    HANDLE Handle;
-	LONGLONG Pointer;
-	LONGLONG Size;
-} Z_TARGET;
-
-/* Open target, get size and write first block */
-Z_TARGET open_write_target(char *path, BYTE *byteblock, DWORD blocksize) {
-	Z_TARGET target;
-	char warning[sizeof(path)+32];
-	sprintf(warning, "could not open %s to write", path);
-	BOOL error_open = FALSE;	// give exact error
-	BOOL error_size = FALSE;
-	BOOL error_write = FALSE;
-	LARGE_INTEGER li_zero;	// win still is not a real 64 bit system...
-	li_zero.QuadPart = 0;
-	DWORD newwritten;
-	for (int cnt=0; cnt<=RETRIES; cnt++) {
-		warning_retry(warning, cnt, RETRIES);
-		target.Handle = open_handle_write(path);
-		if ( target.Handle == INVALID_HANDLE_VALUE ) {
-			error_open = TRUE;
-			continue;
-		} else error_open = FALSE;
-		target.Size = get_size(target.Handle);
-		if ( target.Size < 0 ) {
-			error_size = TRUE;
-			continue;
-		} else error_size = FALSE;
-		if ( !WriteFile(
-			target.Handle,
-			byteblock,
-			blocksize,
-			&newwritten,
-			NULL
-		) || newwritten != blocksize ) {
-			SetFilePointerEx(target.Handle, li_zero, NULL, FILE_BEGIN);
-			error_write = TRUE;
-		} else {
-			target.Pointer = newwritten;
-			return target;
-		}
-	}
-	fprintf(stderr, "Error: ");
-	if ( error_open ) fprintf(stderr, "could not open %s\n", path);
-	if ( error_size ) fprintf(stderr, "could not get size of %s\n", path);
-	if ( error_write ) fprintf(stderr, "could not write to %s\n", path);
-	close_handle(target.Handle);
-	exit(1);
-}
-
-/* Open handle to read */
-Z_TARGET open_read_target(char *path) {
-	Z_TARGET target;
-	char warning[sizeof(path)+32];
-	sprintf(warning, "could not open %s to read", path);
-	for (int cnt=0; cnt<=RETRIES; cnt++) {
-		warning_retry(warning, cnt, RETRIES);
-		target.Handle = open_handle_read(path);
-		if ( target.Handle == INVALID_HANDLE_VALUE ) continue;
-		target.Size = get_size(target.Handle);
-		if ( target.Size >= 0 ) {
-			target.Pointer = 0;
-			return target;
-		}
-	}
-	fprintf(stderr, "Error: could not open %s to read\n", path);
-	close_handle(target.Handle);
-	exit(1);
-}
-
-/* Close target */
-void close_target(Z_TARGET target) {
-	if ( !close_handle(target.Handle) ) {
-		fprintf(stderr, "Error: could not close output file or device\n");
-		exit(1);
 	}
 }
 
@@ -236,7 +125,7 @@ void set_pointer(Z_TARGET target) {
 			FILE_BEGIN
 		) ) return;
 	}
-	fprintf(stderr, "Error: could not point to position %lld\n", target.Pointer);
+	fprintf(stderr, "Error: could not point to position %lld in %s\n", target.Pointer, target.Path);
 	close_target(target);
 	exit(1);
 }
@@ -311,13 +200,6 @@ Z_TARGET write_to_end(Z_TARGET target, BYTE *byteblock, DWORD blocksize) {
 	printf("... %lld of %lld bytes\n", target.Pointer, target.Size);
 	fflush(stdout);
 	return target;
-}
-
-/* Print error to stderr and exit */
-void error_read(Z_TARGET target, DWORD blocksize) {
-	fprintf(stderr, "Error: could not read block at %lld of %lu bytes\n", target.Pointer, blocksize);
-	close_target(target);
-	exit(1);
 }
 
 /* Print error to stderr and exit */
@@ -507,7 +389,6 @@ int main(int argc, char **argv) {
 	BOOL xtrasave = FALSE;	// randomized overwrite
 	BOOL full_verify = FALSE; // to verify every byte
 	BOOL print_size = FALSE; // only print size
-	DWORD arg_blocksize = 0; // block size 0 = not set
 	for (int i=2; i<argc; i++) {
 		if ( argv[i][0] == '/' && argv[i][2] == 0 ) {	// swith?
 			if ( argv[i][1] == 'x' || argv[i][1] == 'X' ) {	// x for two pass mode
@@ -524,29 +405,129 @@ int main(int argc, char **argv) {
 				print_size = TRUE;
 			} else error_wrong(argv[i]);
 		} else {	// not a swtich, may be blocksize?
-			arg_blocksize = read_blocksize(argv[i]);
-			if ( arg_blocksize > 0 ) {
-				if ( blocksize > 0 ) error_toomany();
-				blocksize = arg_blocksize;
-			} else error_wrong(argv[i]);
+			int ptr = 0;
+			while ( TRUE ) {
+				if ( argv[i][ptr] == 0 ) break;
+				if ( argv[i][ptr] < '0' || argv[i][ptr] > '9' ) error_wrong(argv[i]);
+				ptr++;
+			}
+			if ( blocksize > 0 ) error_toomany();
+			DWORD fac = 1;
+			DWORD newbs;
+			while ( --ptr >= 0 ) {
+				newbs = blocksize + ( fac * (argv[i][ptr]-'0') );
+				if ( newbs < blocksize ) {
+					fprintf(stderr, "Error: block size out of range\n");
+					exit(1);
+				}
+				blocksize = newbs;
+				fac *= 10;
+			}
 		}
 	}
 	/* Print size */
 	if ( print_size ) {	// print size, do nothing more
-		HANDLE fh  = open_handle_read(argv[1]);
-		if ( fh == INVALID_HANDLE_VALUE ) {
+		HANDLE fHandle = CreateFile(	// open file or device to read
+			argv[1],
+			FILE_READ_DATA,
+			FILE_SHARE_READ,
+			NULL,
+			OPEN_EXISTING,
+			0,
+			NULL
+		);
+		if ( fHandle == INVALID_HANDLE_VALUE ) {
 			fprintf(stderr, "Error: could not open %s to get size\n", argv[1]);
 			exit(1);
+			}
+		LONGLONG size;
+		DISK_GEOMETRY_EX dge;	// disk?
+		if ( DeviceIoControl(
+			fHandle,
+			IOCTL_DISK_GET_DRIVE_GEOMETRY_EX,
+			NULL,
+			0,
+			&dge,
+			sizeof(dge),
+			NULL,
+			NULL
+		) ) size = dge.DiskSize.QuadPart; 
+		else {
+			LARGE_INTEGER filesize;	// file?
+			if ( GetFileSizeEx(fHandle, &filesize) ) size = filesize.QuadPart;
+			else {
+				fprintf(stderr, "Error: could not determin size of %s\n", argv[1]);
+				exit(1);
+			}
 		}
-		LONGLONG size = get_size(fh);
-		if ( size < 0 ) {
-			fprintf(stderr, "Error: could not determin size of %s\n", argv[1]);
-			exit(1);
-		}
-		printf("All done, %s has %llu bytes\n", argv[1], size);
+		printf("Size of %s is %llu bytes\n", argv[1], size);
 		exit(0);
 	}
 	/* Main task */
+	Z_TARGET target;
+	target.Path = argv[1];
+	target.Handle = CreateFile(
+		target.Path,
+		FILE_READ_DATA | FILE_WRITE_DATA,
+		FILE_SHARE_READ | FILE_SHARE_WRITE,
+		NULL,
+		OPEN_EXISTING,
+		0,
+		NULL
+	);
+	if ( target.Handle == INVALID_HANDLE_VALUE ) {
+		fprintf(stderr, "Error: could not open %s\n", target.Path);
+		exit(1);
+	}
+	LARGE_INTEGER filesize;	// file?
+	if ( GetFileSizeEx(target.Handle, &filesize) ) {
+			target.Size = filesize.QuadPart;
+			target.Type = TTYPE_FILE;
+	} else {
+		DISK_GEOMETRY_EX dge;	// disk?
+		if ( DeviceIoControl(
+			target.Handle,
+			IOCTL_DISK_GET_DRIVE_GEOMETRY_EX,
+			NULL,
+			0,
+			&dge,
+			sizeof(dge),
+			NULL,
+			NULL
+		) ) {
+			target.Size = dge.DiskSize.QuadPart;
+			target.Type = TTYPE_DISK;
+		} else {
+			fprintf(stderr, "Error: could not determin size or type of %s\n", target.Path);
+			exit(1);
+		}
+		if ( !DeviceIoControl(
+			target.Handle,
+			FSCTL_LOCK_VOLUME,
+			NULL,
+			0,
+			NULL,
+			0,
+			NULL,
+			NULL
+		) ) {
+			fprintf(stderr, "Error: could not lock %s\n", target.Path);
+			exit(1);
+		}
+		if ( !DeviceIoControl(
+			target.Handle,
+			IOCTL_DISK_DELETE_DRIVE_LAYOUT,
+			NULL,
+			0,
+			NULL,
+			0,
+			NULL,
+			NULL
+		) ) {
+			fprintf(stderr, "Error: could not delete drive layout of %s\n", target.Path);
+			exit(1);
+		}
+	}
 	DWORD maxblocksize = MAXBLOCKSIZE;
 	if ( blocksize > 0 ) maxblocksize = blocksize;
 	BYTE *byteblock = malloc(maxblocksize);	// generate block to write
@@ -558,7 +539,23 @@ int main(int argc, char **argv) {
 		printf("Pass 1 of 1, writing 0x%02X\n", zeroff);
 	}
 	fflush(stdout);	// spent one day finding out that this is needed for windows stdout
-	Z_TARGET target = open_write_target(argv[1], byteblock, maxblocksize);
+	DWORD newwritten;
+	if ( !WriteFile(
+		target.Handle,
+		byteblock,
+		maxblocksize,
+		&newwritten,
+		NULL
+	) || newwritten != maxblocksize ) {
+		fprintf(
+			stderr,
+			"Error: could not write first block of %d bytes to %s\n",
+			maxblocksize,
+			target.Path
+		);
+		exit(1);
+	}
+	target.Pointer = newwritten;
 	if ( blocksize == 0 && target.Size >= MINCALCSIZE ) {	// calculate best/fastes block size
 		blocksize = MAXBLOCKSIZE;
 		int blockstw = TESTBLOCKS;
@@ -610,12 +607,12 @@ int main(int argc, char **argv) {
 		target = write_to_end(target, byteblock, blocksize);
 	}
 	free(byteblock);
-	close_target(target);
 	/* Verify */
 	printf("Verifying %s\n", argv[1]);
 	fflush(stdout);
-	target = open_read_target(argv[1]);	// open file or drive to verify
 	if ( full_verify ) {	// full verify checks every byte
+		target.Pointer = 0;
+		set_pointer(target);	// start verification at first byte
 		target = verify_blocks(target, blocksize, zeroff);
 		target = verify_blocks(target, MINBLOCKSIZE, zeroff);
 		target = verify_blocks(target, (DWORD)(target.Size-target.Pointer), zeroff);
