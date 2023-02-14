@@ -5,7 +5,7 @@
 /* License: GPL-3 */
 
 /* Version */
-const char *VERSION = "1.0.1_20230118/";
+const char *VERSION = "1.0.1_20230214";
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -49,6 +49,7 @@ void print_help() {
 	printf("    /x - 2 pass wipe, blocks with random values as 1st pass\n");
 	printf("    /f - fill with binary ones / 0xff instad of zeros\n");
 	printf("    /v - verify every byte after wipe\n");
+	printf("    /c - only check, do not wipe\n");
 	printf("    /p - only print size\n\n");
 	printf("Example:\n");
 	printf("zerod.exe \\\\.\\PHYSICALDRIVE1 /x /v\n\n");
@@ -81,10 +82,8 @@ void close_target(Z_TARGET target) {
 		NULL,
 		NULL
 	) ) printf("Warning: could not update %s\n", target.Path);
-	if ( !CloseHandle(target.Handle) ) {
-		fprintf(stderr, "Error: could not close %s\n", target.Path);
-		exit(1);
-	}
+	if ( !CloseHandle(target.Handle) )
+		printf("Warning: could not close %s\n", target.Path);
 }
 
 /* Retrie warning and delay */
@@ -376,6 +375,7 @@ int main(int argc, char **argv) {
 	DWORD blocksize = 0;	// block size to write
 	BOOL xtrasave = FALSE;	// randomized overwrite
 	BOOL full_verify = FALSE; // to verify every byte
+	BOOL pure_check = FALSE;	// only check if bytes = zero
 	BOOL print_size = FALSE; // only print size
 	for (int i=2; i<argc; i++) {
 		if ( argv[i][0] == '/' && argv[i][2] == 0 ) {	// swith?
@@ -387,6 +387,10 @@ int main(int argc, char **argv) {
 				zeroff = 0xff;
 			} else if ( argv[i][1] == 'v' || argv[i][1] == 'V' ) {	// v for full verify
 				if ( full_verify ) error_toomany();
+				full_verify = TRUE;
+			} else if ( argv[i][1] == 'c' || argv[i][1] == 'C' ) {	// v for full verify
+				if ( pure_check ) error_toomany();
+				pure_check = TRUE;
 				full_verify = TRUE;
 			} else if ( argv[i][1] == 'p' || argv[i][1] == 'P' ) {	// p for probe access
 				if ( argc > 3 ) error_toomany();
@@ -454,7 +458,16 @@ int main(int argc, char **argv) {
 	/* Main task */
 	Z_TARGET target;
 	target.Path = argv[1];
-	target.Handle = CreateFile(
+	if ( pure_check ) target.Handle = CreateFile(
+		target.Path,
+		FILE_READ_DATA,
+		FILE_SHARE_READ,
+		NULL,
+		OPEN_EXISTING,
+		0,
+		NULL
+	);
+	else target.Handle = CreateFile(
 		target.Path,
 		FILE_READ_DATA | FILE_WRITE_DATA,
 		FILE_SHARE_READ | FILE_SHARE_WRITE,
@@ -489,7 +502,7 @@ int main(int argc, char **argv) {
 			fprintf(stderr, "Error: could not determin size or type of %s\n", target.Path);
 			exit(1);
 		}
-		if ( !DeviceIoControl(
+		if ( !pure_check && !DeviceIoControl(
 			target.Handle,
 			IOCTL_DISK_DELETE_DRIVE_LAYOUT,
 			NULL,
@@ -503,85 +516,91 @@ int main(int argc, char **argv) {
 			exit(1);
 		}
 	}
-	DWORD maxblocksize = MAXBLOCKSIZE;
-	if ( blocksize > 0 ) maxblocksize = blocksize;
-	BYTE *byteblock = malloc(maxblocksize);	// generate block to write
-	if ( xtrasave ) {
-		 for (int i=0; i<maxblocksize; i++) byteblock[i] = (char)rand();
-		 printf("Pass 1 of 2, writing random bytes\n");
+	
+	if ( pure_check ) {
+		if ( blocksize == 0 ) blocksize = MAXBLOCKSIZE;
 	} else {
-		memset(byteblock, zeroff, maxblocksize);
-		printf("Pass 1 of 1, writing 0x%02X\n", zeroff);
-	}
-	fflush(stdout);	// spent one day finding out that this is needed for windows stdout
-	DWORD newwritten;
-	if ( !WriteFile(
-		target.Handle,
-		byteblock,
-		maxblocksize,
-		&newwritten,
-		NULL
-	) || newwritten != maxblocksize ) {
-		fprintf(
-			stderr,
-			"Error: could not write first block of %d bytes to %s\n",
-			maxblocksize,
-			target.Path
-		);
-		exit(1);
-	}
-	target.Pointer = newwritten;
-	if ( blocksize == 0 && target.Size >= MINCALCSIZE ) {	// calculate best/fastes block size
-		blocksize = MAXBLOCKSIZE;
-		int blockstw = TESTBLOCKS;
-		printf("Calculating best block size\n");
-		fflush(stdout);
-		clock_t start, duration;
-		clock_t bestduration = MAXCLOCK;
-		DWORD testsize = blocksize;
-		DWORD newwritten;
-		while ( testsize>=MINBLOCKSIZE ) {
-			printf("Testing block size %lu bytes\n", testsize);
-			start = clock();	// get start time
-			for (int blockcnt=0; blockcnt<blockstw; blockcnt++) {
-				if ( !WriteFile(
-					target.Handle,
-					byteblock,
-					testsize,
-					&newwritten,
-					NULL
-				) || newwritten < testsize ) {
-					set_pointer(target);	// on write error go back to last correct block
-					duration = MAXCLOCK;
-					break;
-				} else target.Pointer += newwritten;
-			}
-			duration = clock() - start;
-			printf("... %lld of %lld bytes\n", target.Pointer, target.Size);
-			fflush(stdout);
-			if ( duration < bestduration ) {
-				bestduration = duration;
-				blocksize = testsize;
-			} else if ( duration > bestduration ) break;
-			testsize = testsize >> 1;	// testsize / 2
-			blockstw = blockstw << 1;	// double blocks to test
+		/* Wipe */
+		DWORD maxblocksize = MAXBLOCKSIZE;
+		if ( blocksize > 0 ) maxblocksize = blocksize;
+		BYTE *byteblock = malloc(maxblocksize);	// generate block to write
+		if ( xtrasave ) {
+			 for (int i=0; i<maxblocksize; i++) byteblock[i] = (char)rand();
+			 printf("Pass 1 of 2, writing random bytes\n");
+		} else {
+			memset(byteblock, zeroff, maxblocksize);
+			printf("Pass 1 of 1, writing 0x%02X\n", zeroff);
 		}
-		if ( bestduration == MAXCLOCK) blocksize = MINBLOCKSIZE; 	// try minimal block size as backup
-	}  else if ( blocksize == 0 ) blocksize = MAXBLOCKSIZE;
-	printf("Using block size of %lu bytes\n", blocksize);
-	fflush(stdout);
-	/* First pass */
-	target = write_to_end(target, byteblock, blocksize);
-	/* Second passs */
-	if ( xtrasave ) {
-		printf("Pass 2 of 2, writing 0x%02X\n", zeroff);
+		fflush(stdout);	// spent one day finding out that this is needed for windows stdout
+		DWORD newwritten;
+		if ( !WriteFile(
+			target.Handle,
+			byteblock,
+			maxblocksize,
+			&newwritten,
+			NULL
+		) || newwritten != maxblocksize ) {
+			fprintf(
+				stderr,
+				"Error: could not write first block of %d bytes to %s\n",
+				maxblocksize,
+				target.Path
+			);
+			exit(1);
+		}
+		target.Pointer = newwritten;
+		if ( blocksize == 0 && target.Size >= MINCALCSIZE ) {	// calculate best/fastes block size
+			blocksize = MAXBLOCKSIZE;
+			int blockstw = TESTBLOCKS;
+			printf("Calculating best block size\n");
+			fflush(stdout);
+			clock_t start, duration;
+			clock_t bestduration = MAXCLOCK;
+			DWORD testsize = blocksize;
+			DWORD newwritten;
+			while ( testsize>=MINBLOCKSIZE ) {
+				printf("Testing block size %lu bytes\n", testsize);
+				start = clock();	// get start time
+				for (int blockcnt=0; blockcnt<blockstw; blockcnt++) {
+					if ( !WriteFile(
+						target.Handle,
+						byteblock,
+						testsize,
+						&newwritten,
+						NULL
+					) || newwritten < testsize ) {
+						set_pointer(target);	// on write error go back to last correct block
+						duration = MAXCLOCK;
+						break;
+					} else target.Pointer += newwritten;
+				}
+				duration = clock() - start;
+				printf("... %lld of %lld bytes\n", target.Pointer, target.Size);
+				fflush(stdout);
+				if ( duration < bestduration ) {
+					bestduration = duration;
+					blocksize = testsize;
+				} else if ( duration > bestduration ) break;
+				testsize = testsize >> 1;	// testsize / 2
+				blockstw = blockstw << 1;	// double blocks to test
+			}
+			if ( bestduration == MAXCLOCK) blocksize = MINBLOCKSIZE; 	// try minimal block size as backup
+		}  else if ( blocksize == 0 ) blocksize = MAXBLOCKSIZE;
+		printf("Using block size of %lu bytes\n", blocksize);
 		fflush(stdout);
-		memset(byteblock, zeroff, maxblocksize);
-		target.Pointer = 0;
-		set_pointer(target);
+		/* First pass */
 		target = write_to_end(target, byteblock, blocksize);
+		/* Second passs */
+		if ( xtrasave ) {
+			printf("Pass 2 of 2, writing 0x%02X\n", zeroff);
+			fflush(stdout);
+			memset(byteblock, zeroff, maxblocksize);
+			target.Pointer = 0;
+			set_pointer(target);
+			target = write_to_end(target, byteblock, blocksize);
+		}
+		free(byteblock);
 	}
-	free(byteblock);
 	/* Verify */
 	printf("Verifying %s\n", argv[1]);
 	fflush(stdout);

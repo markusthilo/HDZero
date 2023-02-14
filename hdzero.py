@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 __author__ = 'Markus Thilo'
-__version__ = '1.0.1-0001_2023-01-17'
+__version__ = '1.0.1-0001_2023-02-14'
 __license__ = 'GPL-3'
 __email__ = 'markus.thilo@gmail.com'
 __status__ = 'Release'
@@ -141,15 +141,12 @@ class WinUtils:
 		'Run diskpart script'
 		self.tmpscriptpath.write_text(script)
 		proc = self.cmd_launch(['diskpart', '/s', self.tmpscriptpath])
-		try:
-			ret = proc.wait(timeout=self.WINCMD_TIMEOUT)
-		except:
-			ret = None
+		proc.wait()
 		try:
 			self.tmpscriptpath.unlink()
 		except:
-			return
-		return ret
+			pass
+		return
 
 	def clean_table(self, driveid):
 		'Clean partition table using diskpart'
@@ -160,9 +157,7 @@ class WinUtils:
 		return self.run_diskpart(f'''select disk {driveno}
 clean
 '''
-#list partition
-#'''
-		)	# list partiton makes shure that the disk is free to write
+		)
 
 	def create_partition(self, driveid, label, letter=None, table='gpt', fs='ntfs'):
 		'Create partition using diskpart'
@@ -602,12 +597,6 @@ class Gui(CTk, WinUtils, Logging):
 		self.head_info.set(self.work_target) 
 		self.main_info.set(self.conf['TEXT']['cleaning_table'])
 		self.clean_table(self.work_target)
-		#if self.clean_table(self.work_target) != 0:
-		#	showwarning(title=self.conf['TEXT']['warning_title'],
-		#		message=self.conf['TEXT']['not_clean_table'] + f' {self.work_target}')
-		#	self.working = False
-		#	self.quit_work()
-		#	return
 		self.zerod_proc = self.zerod_launch(
 			self.work_target,
 			blocksize = self.options['blocksize'],
