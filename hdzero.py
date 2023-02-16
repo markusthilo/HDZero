@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 __author__ = 'Markus Thilo'
-__version__ = '1.0.1-0001_2023-02-14'
+__version__ = '1.0.1-0001_2023-02-16'
 __license__ = 'GPL-3'
 __email__ = 'markus.thilo@gmail.com'
 __status__ = 'Release'
@@ -19,10 +19,10 @@ from time import sleep
 from datetime import datetime
 from threading import Thread
 from customtkinter import CTk, set_appearance_mode, set_default_color_theme
-from customtkinter import CTkToplevel, CTkFrame, CTkLabel
+from customtkinter import CTkToplevel, CTkFrame, CTkLabel, CTkSwitch
 from customtkinter import CTkButton, CTkEntry, CTkRadioButton
 from customtkinter import CTkCheckBox, CTkProgressBar, CTkOptionMenu
-from tkinter import StringVar, BooleanVar, PhotoImage, CENTER
+from tkinter import StringVar, BooleanVar, PhotoImage, CENTER, NORMAL, DISABLED
 from tkinter.messagebox import askquestion, showwarning, showerror
 from tkinter.filedialog import askopenfilenames, asksaveasfilename
 
@@ -69,7 +69,7 @@ class WinUtils:
 			universal_newlines = True
 		)
 
-	def zerod_launch(self, targetpath, blocksize=None, extra=False, writeff=False, verify=False):
+	def zerod_launch(self, targetpath, blocksize=None, extra=False, writeff=False, verify=False, check=False):
 		'Use zerod.exe to wipe file or drive'
 		cmd = [self.zerod_path, targetpath]
 		if blocksize:
@@ -80,12 +80,15 @@ class WinUtils:
 			else:
 				if blocksize % 512 == 0 and blocksize <= 1048576:
 					cmd.append(str(blocksize))
-		if extra:
-			cmd.append('/x')
 		if writeff:
 			cmd.append('/f')
-		if verify:
-			cmd.append('/v')
+		if check:
+			cmd.append('/c')
+		else:
+			if extra:
+				cmd.append('/x')
+			if verify:
+				cmd.append('/v')
 		return self.cmd_launch(cmd)
 
 	def zerod_get_size(self, targetpath):
@@ -228,13 +231,14 @@ class Gui(CTk, WinUtils, Logging):
 
 	PAD = 4
 	SLIMPAD = 2
+	BUTTONWIDTH = 48
 	LABELWIDTH = 400
 	BARWIDTH = 200
 	BARHEIGHT = 20
 	LETTERWIDTH = 28
 	CORNER_RADIUS = 6
-	LETTER_COL = "green"
-	WARNING_COL = "red"
+	WARNING_FG = 'red'
+	WARNING_BG = 'white'
 	
 	SIZEBASE = (
 		{ 'PiB': 2**50, 'TiB': 2**40, 'GiB': 2**30, 'MiB': 2**20, 'kiB': 2**10 },
@@ -255,15 +259,9 @@ class Gui(CTk, WinUtils, Logging):
 		self.title(self.conf['TEXT']['title'] + f' v{__version__}')
 		self.app_icon = PhotoImage(file=self.__file_parentpath__/'icon.png')
 		self.iconphoto(False, self.app_icon)
-		if not self.i_am_admin and askquestion(
-			self.conf['TEXT']['warning_title'],
-			self.conf['TEXT']['notadmin']
-			) == 'yes':
-			self.abort = True
-		else:
-			self.abort = False
-			self.mainframe_user_opts = dict()
-			self.mainframe()
+		self.resizable(False, False)
+		self.mainframe_user_opts = dict()
+		self.mainframe()
 
 	def readable(self, size):
 		'Genereate readable size string'
@@ -295,126 +293,178 @@ class Gui(CTk, WinUtils, Logging):
 		'Define Main Frame'
 		self.main_frame = CTkFrame(self)
 		self.main_frame.pack()
-		if self.i_am_admin:	# no disk access without admin rights
-			### WIPE DRIVE ###
-			self.drive_frame = CTkFrame(self.main_frame)
-			self.drive_frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
-			head_frame = CTkFrame(self.drive_frame)
-			head_frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
-			CTkLabel(head_frame, text=self.conf['TEXT']['disklabel']).pack(
-				padx=2*self.PAD, pady=self.PAD, side='left')
-			opt_frame = CTkFrame(self.drive_frame)
-			opt_frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
-			### DISK OPTIONS FRAME ###
-			CTkButton(opt_frame, text=self.conf['TEXT']['refresh'],
-				command=self.refresh).grid(padx=self.PAD, pady=(self.PAD,0), row=0, column=0, sticky='w')
-			self.mainframe_user_opts['parttable'] = StringVar(value=self.conf['DEFAULT']['parttable'])
-			CTkRadioButton(master=opt_frame, variable=self.mainframe_user_opts['parttable'],
-				value='None', text=self.conf['TEXT']['no_diskpart']).grid(
-				padx=self.PAD, pady=(self.PAD, 0), row=0, column=1, sticky='w')
-			CTkRadioButton(master=opt_frame, variable=self.mainframe_user_opts['parttable'],
-				value='gpt', text='GPT').grid(padx=self.PAD, row=1, column=1, sticky='w')
-			CTkRadioButton(master=opt_frame, variable=self.mainframe_user_opts['parttable'],
-				value='mbr', text='MBR').grid(padx=self.PAD, pady=(0, self.PAD), row=2, column=1, sticky='w')
-			self.mainframe_user_opts['fs'] = StringVar(value=self.conf['DEFAULT']['fs'])
-			CTkRadioButton(master=opt_frame, variable=self.mainframe_user_opts['fs'],
-				value='ntfs', text='NTFS').grid(padx=self.PAD, pady=(self.PAD, 0), row=0, column=2, sticky='w')
-			CTkRadioButton(master=opt_frame, variable=self.mainframe_user_opts['fs'],
-				value='exfat', text='exFAT').grid(padx=self.PAD, row=1, column=2, sticky='w')
-			CTkRadioButton(master=opt_frame, variable=self.mainframe_user_opts['fs'],
-				value='fat32', text='FAT32').grid(padx=self.PAD, pady=(0, self.PAD), row=2, column=2, sticky='w')
-			labeltext = self.conf['TEXT']['volname']
-			CTkLabel(opt_frame, text=f'{labeltext}:').grid(padx=self.PAD, pady=(
-				self.PAD, 0), row=0, column=3, sticky='e')
-			self.mainframe_user_opts['volname'] = StringVar(value=self.conf['DEFAULT']['volname'])
-			CTkEntry(opt_frame, textvariable=self.mainframe_user_opts['volname']).grid(
-				padx=self.PAD, pady=(self.PAD, 0), row=0, column=4, sticky='w')
-			self.mainframe_user_opts['writelog'] = BooleanVar(value=self.conf['DEFAULT']['writelog'])
-			CTkCheckBox(master=opt_frame, text=self.conf['TEXT']['writelog'], variable=self.mainframe_user_opts['writelog'],
-				onvalue=True, offvalue=False).grid(padx=self.PAD, pady=(0, self.PAD), row=2, column=4, sticky='w')
-			CTkButton(opt_frame, text=self.conf['TEXT']['editlog'],
-				command=self.edit_log_header).grid(padx=self.PAD, pady=(0, self.PAD), row=2, column=3, sticky='w')	
-			### DRIVES ###
-			labeltext = self.conf['TEXT']['wipedrive']
-			for drive in self.list_drives():
-				frame = CTkFrame(self.drive_frame)
-				frame.pack(padx=self.PAD, pady=(0, self.PAD), fill='both', expand=True)
-				partitions = [ part.Dependent.DeviceID for part in self.get_partitions(drive.index) ]
-				if self.this_drive in partitions or 'C:' in partitions:
-					hover_color = self.WARNING_COL
-					warning = True
-				else:
-					hover_color = self.LETTER_COL
-					warning = False
-				if partitions == list():
-					letter = ''
-				else:
-					letter = partitions[0]
-				CTkButton(frame, text=f'{labeltext} {drive.Index}', hover_color=hover_color,
-					command=partial(self.wipe_disk, drive.Index)).pack(
-					padx=self.PAD, pady=self.SLIMPAD, side='left')
-				if letter == '':
-					label = CTkLabel(frame, text='', width=self.LETTERWIDTH)
-				else:
-					if warning:
-						label = CTkLabel(frame, text=letter, fg_color="red", text_color="white",
-						width=self.LETTERWIDTH, corner_radius=self.CORNER_RADIUS)
-					else:
-						label = CTkLabel(frame, text=letter, width=self.LETTERWIDTH)
-				label.pack(padx=self.PAD, pady=self.SLIMPAD, side='left')
-				CTkLabel(
-					frame,
-					text=f'{drive.Caption}, {drive.MediaType} ({self.readable(self.zerod_get_size(drive.DeviceID))})'
-				).pack(padx=self.PAD, pady=self.SLIMPAD, anchor='w')	
-		### WIPE FILE(S) ###
-		self.file_frame = CTkFrame(self.main_frame)
-		self.file_frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
+		head_frame = CTkFrame(self.main_frame)
+		head_frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
+		CTkLabel(head_frame, text=self.conf['TEXT']['head']).pack(
+			padx=2*self.PAD, pady=self.PAD, side='left')
 		if not self.i_am_admin:
-			notadmin_frame = CTkFrame(self.file_frame)
-			notadmin_frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
-			CTkLabel(notadmin_frame, text=self.conf['TEXT']['notadmin']).pack(
-				padx=2*self.PAD, pady=self.PAD, side='left')
-		frame = CTkFrame(self.file_frame)
-		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
-		CTkButton(frame, text=self.conf['TEXT']['wipefile'], command=self.wipe_files).pack(
-			padx=self.PAD, pady=self.PAD, side='left')
-		CTkLabel(frame, text=self.conf['TEXT']['filelabel']).pack(padx=self.PAD, pady=self.PAD, side='left')
-		self.mainframe_user_opts['deletefile'] = BooleanVar(value=self.conf['DEFAULT']['deletefile'])
-		CTkCheckBox(master=frame, text=self.conf['TEXT']['deletefile'], variable=self.mainframe_user_opts['deletefile'],
-			onvalue=True, offvalue=False).pack(padx=self.PAD, pady=self.PAD, side='left')
-		### GENERAL OPTIONS FRAME ###
+			frame = CTkFrame(self.main_frame, fg_color=self.WARNING_BG)
+			frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
+			CTkLabel(
+				frame,
+				text=self.conf['TEXT']['notadmin'],
+				fg_color=self.WARNING_BG,
+				text_color=self.WARNING_FG
+			).pack(padx=2*self.PAD, pady=self.PAD, side='left')	
+		### DISK OPTIONS FRAME ###
 		frame = CTkFrame(self.main_frame)
 		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
-		frame = CTkFrame(frame)
+		CTkButton(frame, text=self.conf['TEXT']['refresh'],
+			command=self.refresh).grid(padx=self.PAD, pady=(self.PAD,0), row=0, column=0, sticky='w')
+		self.mainframe_user_opts['parttable'] = StringVar(value=self.conf['DEFAULT']['parttable'])
+		CTkRadioButton(frame, variable=self.mainframe_user_opts['parttable'],
+			value='None', text=self.conf['TEXT']['no_diskpart']).grid(
+			padx=self.PAD, pady=(self.PAD, 0), row=0, column=1, sticky='w')
+		CTkRadioButton(frame, variable=self.mainframe_user_opts['parttable'],
+			value='gpt', text='GPT').grid(padx=self.PAD, row=1, column=1, sticky='w')
+		CTkRadioButton(frame, variable=self.mainframe_user_opts['parttable'],
+			value='mbr', text='MBR').grid(padx=self.PAD, pady=(0, self.PAD), row=2, column=1, sticky='w')
+		self.mainframe_user_opts['fs'] = StringVar(value=self.conf['DEFAULT']['fs'])
+		CTkRadioButton(frame, variable=self.mainframe_user_opts['fs'],
+			value='ntfs', text='NTFS').grid(padx=self.PAD, pady=(self.PAD, 0), row=0, column=2, sticky='w')
+		CTkRadioButton(frame, variable=self.mainframe_user_opts['fs'],
+			value='exfat', text='exFAT').grid(padx=self.PAD, row=1, column=2, sticky='w')
+		CTkRadioButton(frame, variable=self.mainframe_user_opts['fs'],
+			value='fat32', text='FAT32').grid(padx=self.PAD, pady=(0, self.PAD), row=2, column=2, sticky='w')
+		labeltext = self.conf['TEXT']['volname']
+		CTkLabel(frame, text=f'{labeltext}:').grid(padx=self.PAD, pady=(
+			self.PAD, 0), row=0, column=3, sticky='e')
+		self.mainframe_user_opts['volname'] = StringVar(value=self.conf['DEFAULT']['volname'])
+		CTkEntry(frame, textvariable=self.mainframe_user_opts['volname']).grid(
+			padx=self.PAD, pady=(self.PAD, 0), row=0, column=4, sticky='w')
+		self.mainframe_user_opts['writelog'] = BooleanVar(value=self.conf['DEFAULT']['writelog'])
+		CTkCheckBox(frame, text=self.conf['TEXT']['writelog'], variable=self.mainframe_user_opts['writelog'],
+			onvalue=True, offvalue=False).grid(padx=self.PAD, pady=(0, self.PAD), row=2, column=4, sticky='w')
+		CTkButton(frame, text=self.conf['TEXT']['editlog'],
+			command=self.edit_log_header).grid(padx=self.PAD, pady=(0, self.PAD), row=2, column=3, sticky='w')
+		### DRIVES ###
+		frame = CTkFrame(self.main_frame)
+		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
+		self.selected_target = StringVar()
+		CTkLabel(frame, text=self.conf['TEXT']['drive']).grid(padx=self.PAD, row=0, column=0, sticky='w')
+		CTkLabel(frame, text=self.conf['TEXT']['mounted']).grid(padx=self.PAD, row=0, column=1, sticky='w')
+		CTkLabel(frame, text=self.conf['TEXT']['details']).grid(padx=self.PAD, row=0, column=2, sticky='w')
+		row = 1
+		for drive in self.list_drives():
+			button = CTkRadioButton(
+				frame,
+				text = f'{drive.index}',
+				command = self.enable_start_button,
+				width = self.BUTTONWIDTH,
+				variable = self.selected_target,
+				value = drive.index
+			)
+			button.grid(padx=self.PAD, row=row, column=0, sticky='w')
+			partitions = [ part.Dependent.DeviceID for part in self.get_partitions(drive.index) ]
+			p_label = CTkLabel(frame, text=', '.join(partitions))
+			p_label.grid(padx=self.PAD, row=row, column=1, sticky='w')
+			i_label = CTkLabel(
+				frame,
+				text = f'{drive.Caption}, {drive.MediaType} ({self.readable(self.zerod_get_size(drive.DeviceID))})'
+			)
+			i_label.grid(padx=self.PAD, row=row, column=2, sticky='w')
+			if self.i_am_admin:
+				if self.this_drive in partitions or 'C:' in partitions:
+					button.configure(
+						text_color = self.WARNING_FG,
+						fg_color = self.WARNING_FG,
+						border_color = self.WARNING_FG,
+						hover_color = self.WARNING_FG
+					)
+					p_label.configure(text_color=self.WARNING_FG)
+					i_label.configure(text_color=self.WARNING_FG)
+			else:
+				button.configure(state=DISABLED)
+			row += 1
+		### FILE(S) ###
+		CTkRadioButton(
+				frame,
+				text = self.conf['TEXT']['files'],
+				command = self.enable_start_button,
+				width = self.BUTTONWIDTH,
+				variable = self.selected_target,
+				value = 'files'
+		).grid(padx=self.PAD, row=row, column=0, sticky='w')
+		self.mainframe_user_opts['deletefiles'] = BooleanVar(value=self.conf['DEFAULT']['deletefiles'])
+		CTkCheckBox(
+			frame,
+			text = self.conf['TEXT']['deletefiles'],
+			variable = self.mainframe_user_opts['deletefiles'],
+			onvalue = True,
+			offvalue = False
+		).grid(padx=self.PAD, row=row, column=2, sticky='w')
+		### OPTIONS FRAME ###
+		frame = CTkFrame(self.main_frame)
 		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
 		self.mainframe_user_opts['extra'] = BooleanVar(value=self.conf['DEFAULT']['extra'])
-		CTkCheckBox(master=frame, text=self.conf['TEXT']['extra'], variable=self.mainframe_user_opts['extra'],
-			onvalue=True, offvalue=False).pack(padx=self.PAD, pady=self.PAD, side='left')
-		self.mainframe_user_opts['writeff'] = BooleanVar(value=self.conf['DEFAULT']['writeff'])
-		CTkCheckBox(master=frame, text=self.conf['TEXT']['writeff'], variable=self.mainframe_user_opts['writeff'],
-			onvalue=True, offvalue=False).pack(padx=self.PAD, pady=self.PAD, side='left')
+		CTkCheckBox(
+			frame,
+			text = self.conf['TEXT']['extra'],
+			width = self.BUTTONWIDTH,
+			variable = self.mainframe_user_opts['extra'],
+			onvalue = True,
+			offvalue=False
+		).grid(padx=self.PAD, row=0, column=0, sticky='w')
+		self.mainframe_user_opts['ff'] = BooleanVar(value=self.conf['DEFAULT']['ff'])
+		CTkCheckBox(
+			frame,
+			text = self.conf['TEXT']['ff'],
+			width = self.BUTTONWIDTH,
+			variable = self.mainframe_user_opts['ff'],
+			onvalue=True,
+			offvalue=False
+		).grid(padx=self.PAD, row=0, column=1, sticky='w')
 		self.mainframe_user_opts['full_verify'] = BooleanVar(value=self.conf['DEFAULT']['full_verify'])
-		CTkCheckBox(master=frame, text=self.conf['TEXT']['full_verify'],
-			variable=self.mainframe_user_opts['full_verify'], onvalue=True, offvalue=False).pack(
-			padx=self.PAD, pady=self.PAD, side='left')
-		CTkLabel(frame, text=self.conf['TEXT']['blocksize']).pack(padx=self.PAD, pady=self.PAD, side='left')
+		CTkCheckBox(
+			frame,
+			text = self.conf['TEXT']['full_verify'],
+			width = self.BUTTONWIDTH,
+			variable = self.mainframe_user_opts['full_verify'],
+			onvalue=True,
+			offvalue=False
+		).grid(padx=self.PAD, row=0, column=0, sticky='w')
+		CTkLabel(frame, text='').grid(padx=self.PAD, row=0, column=3, sticky='w')
+		CTkLabel(frame, text=self.conf['TEXT']['blocksize']).grid(padx=self.PAD, row=0, column=4, sticky='w')
 		self.mainframe_user_opts['blocksize'] = StringVar(value=self.conf['DEFAULT']['blocksize'])
 		blocksizes = ['auto'] + [ str(2**p) for p in range(9, 20) ]
 		blocksizes.remove(self.conf['DEFAULT']['blocksize'])
 		blocksizes = [self.conf['DEFAULT']['blocksize']] + blocksizes
 		drop = CTkOptionMenu(master=frame, variable=self.mainframe_user_opts['blocksize'],
 			dynamic_resizing=False, values=blocksizes)
-		drop.pack(padx=self.PAD, pady=self.PAD, side='left')
+		drop.grid(padx=self.PAD, row=0, column=5, sticky='w')
+		self.mainframe_user_opts['check'] = BooleanVar(value=self.conf['DEFAULT']['check'])
+		CTkCheckBox(
+			frame,
+			text = self.conf['TEXT']['check'],
+			width = self.BUTTONWIDTH,
+			variable = self.mainframe_user_opts['check'],
+			onvalue = True,
+			offvalue = False
+		).grid(padx=self.PAD, row=1, column=0, sticky='w')
+		self.mainframe_user_opts['askmore'] = BooleanVar(value=self.conf['DEFAULT']['askmore'])
+		CTkCheckBox(
+			frame,
+			text = self.conf['TEXT']['askmore'],
+			width = self.BUTTONWIDTH,
+			variable = self.mainframe_user_opts['askmore'],
+			onvalue = True, offvalue = False
+		).grid(padx=self.PAD, row=1, column=1, sticky='w')
 		### BOTTOM ###
 		frame = CTkFrame(self.main_frame)
 		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
-		frame = CTkFrame(frame)
-		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
-		self.mainframe_user_opts['askmore'] = BooleanVar(value=self.conf['DEFAULT']['askmore'])
-		CTkCheckBox(master=frame, text=self.conf['TEXT']['askmore'], variable=self.mainframe_user_opts['askmore'],
-			onvalue=True, offvalue=False).pack(padx=self.PAD, pady=self.PAD, side='left')
+		self.start_button = CTkButton(
+			frame,
+			text = self.conf['TEXT']['start'],
+			command = self.start_work,
+			state = DISABLED
+		)
+		self.start_button.pack(padx=self.PAD, pady=self.PAD, side='left')
 		CTkButton(frame, text=self.conf['TEXT']['quit'], command=self.quit_app).pack(
 			padx=self.PAD, pady=self.PAD, side='right')
+
+	def enable_start_button(self):
+		'When target is selected'
+		self.start_button.configure(state=NORMAL)
 
 	def decode_settings(self):
 		'Decode settings and write as default to config file'
@@ -434,6 +484,16 @@ class Gui(CTk, WinUtils, Logging):
 		self.decode_settings()
 		self.main_frame.destroy()
 		self.mainframe()
+
+	def start_work(self):
+		'Star work process'
+		target = self.selected_target.get()
+		if target:
+			self.decode_settings()
+			if target == 'files':
+				self.init_files()
+			else:
+				self.init_drive(target)
 
 	def quit_app(self):
 		'Write config an quit'
@@ -499,7 +559,7 @@ class Gui(CTk, WinUtils, Logging):
 		using_blocksize_str = self.conf['TEXT']['using_blocksize']
 		verifying_str = self.conf['TEXT']['verifying']
 		verified_str = self.conf['TEXT']['verified']
-		were_wiped_str = self.conf['TEXT']['were_wiped']
+		are_str = self.conf['TEXT']['are']
 		pass_of_str = ''
 		for msg_raw in self.zerod_proc.stdout:
 			msg_split = msg_raw.split()
@@ -531,7 +591,7 @@ class Gui(CTk, WinUtils, Logging):
 				info = f'{verified_str} {msg_split[1]} {bytes_str}'
 				self.main_info.set(info)
 			elif msg_split[0] == 'All':
-				info = f'{msg_split[2]} {bytes_str} {were_wiped_str}'
+				info = f'{msg_split[2]} {bytes_str} {are_str} {msg_split[5]}'
 				self.main_info.set(info)
 			elif msg_split[0] == 'Warning:':
 				info = msg
@@ -544,7 +604,15 @@ class Gui(CTk, WinUtils, Logging):
 			if info and self.options['writelog']:
 				self.append_log(info)
 
-	def wipe_disk(self, diskindex):
+	def wipe_drive(self):
+		'Only check, do not wipe'
+		pass
+
+	def check_drive(self):
+		'Only check, do not wipe'
+		pass
+
+	def init_drive(self, diskindex):
 		'Wipe selected disk - launch thread'
 		self.decode_settings()
 		drive = self.get_drive(diskindex)
@@ -602,7 +670,8 @@ class Gui(CTk, WinUtils, Logging):
 			blocksize = self.options['blocksize'],
 			extra = self.options['extra'],
 			writeff = self.options['writeff'],
-			verify = self.options['full_verify']
+			verify = self.options['full_verify'],
+			check = self.options['pure_check']
 		)
 		self.watch_zerod()
 		if not self.working:
@@ -654,27 +723,47 @@ class Gui(CTk, WinUtils, Logging):
 		self.progressbar.set(1)
 
 	def wipe_files(self):
+		'Only check, do not wipe'
+		pass
+
+	def check_files(self):
+		'Only check, do not wipe'
+		pass
+
+	def init_files(self):
 		'Wipe selected file or files - launch thread'
-		self.decode_settings()
-		self.work_target = askopenfilenames(
-			title=self.conf['TEXT']['filestowipe'],
-			initialdir=self.conf['DEFAULT']['initialdir']
-		)
-		if len(self.work_target) > 0:
+		if self.options['check']:
+			self.work_target = askopenfilenames(
+				title=self.conf['TEXT']['filestocheck'],
+				initialdir=self.conf['DEFAULT']['initialdir']
+			)
+		else:
+			self.work_target = askopenfilenames(
+				title=self.conf['TEXT']['filestowipe'],
+				initialdir=self.conf['DEFAULT']['initialdir']
+			)
+		if len(self.work_target) < 1:
+			self.refresh()
+			return
+		if not self.options['check']:
 			question = self.conf['TEXT']['filewarning']
 			question += self.list_to_string(self.work_target)
-			if self.confirm(question):
-				self.conf['DEFAULT']['initialdir'] = str(Path(self.work_target[0]).parent)
-				self.decode_settings()
-				self.options['writelog'] = False
-				self.work_files_thread = Thread(target=self.work_files)
-				self.work_files_thread.start()
+			if not self.confirm(question):
+				self.refresh()
 				return
+		self.conf['DEFAULT']['initialdir'] = str(Path(self.work_target[0]).parent)
+		self.decode_settings()
+		self.options['writelog'] = False
+		self.work_files_thread = Thread(target=self.work_files)
+		self.work_files_thread.start()
 		self.refresh()
 
 	def work_files(self):
 		'Do the work with zerod on targetrd files'
-		self.workframe(self.conf['TEXT']['wipefile'])
+		if self.options['check']:
+			self.workframe(self.conf['TEXT']['checkfile'])
+		else:
+			self.workframe(self.conf['TEXT']['wipefile'])
 		of_str = self.conf['TEXT']['of']
 		file_str = self.conf['TEXT']['file']
 		files_of_str = ''
@@ -688,8 +777,9 @@ class Gui(CTk, WinUtils, Logging):
 				file,
 				blocksize = self.blocksize,
 				extra = self.options['extra'],
-				writeff = self.options['writeff'],
-				verify = self.options['full_verify']
+				writeff = self.options['ff'],
+				verify = self.options['full_verify'],
+				check = self.options['check']
 			)
 			if qt_files > 1:
 				file_cnt += 1
@@ -698,15 +788,16 @@ class Gui(CTk, WinUtils, Logging):
 			if not self.working:
 				return
 			if self.zerod_proc.wait() == 0:
-				self.main_info.set(self.conf['TEXT']['deleting_file'])
-				try:
-					Path(file).unlink()
-				except:
-					errors.append(file)
+				if self.options['deletefiles'] and not self.options['check']:
+					self.main_info.set(self.conf['TEXT']['deleting_file'])
+					try:
+						Path(file).unlink()
+					except:
+						errors.append(file)
 			else:
 				errors.append(file)
-		self.head_info.set('')
-		self.main_info.set(self.conf['TEXT']['all_done'])
+		self.head_info.set(self.conf['TEXT']['all_done'])
+		#self.main_info.set(self.conf['TEXT']['all_done'])
 		self.progress_info.set('100 %')
 		self.working = False
 		if errors != list():
@@ -717,6 +808,4 @@ class Gui(CTk, WinUtils, Logging):
 			self.quit_work()
 
 if __name__ == '__main__':  # start here
-	gui = Gui()
-	if not gui.abort:
-		gui.mainloop()
+	Gui().mainloop()
