@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 __author__ = 'Markus Thilo'
-__version__ = '1.0.1-0001_2023-02-16'
+__version__ = '1.0.1-0001_2023-02-17'
 __license__ = 'GPL-3'
 __email__ = 'markus.thilo@gmail.com'
 __status__ = 'Release'
@@ -306,37 +306,6 @@ class Gui(CTk, WinUtils, Logging):
 				fg_color=self.WARNING_BG,
 				text_color=self.WARNING_FG
 			).pack(padx=2*self.PAD, pady=self.PAD, side='left')	
-		### DISK OPTIONS FRAME ###
-		frame = CTkFrame(self.main_frame)
-		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
-		CTkButton(frame, text=self.conf['TEXT']['refresh'],
-			command=self.refresh).grid(padx=self.PAD, pady=(self.PAD,0), row=0, column=0, sticky='w')
-		self.mainframe_user_opts['parttable'] = StringVar(value=self.conf['DEFAULT']['parttable'])
-		CTkRadioButton(frame, variable=self.mainframe_user_opts['parttable'],
-			value='None', text=self.conf['TEXT']['no_diskpart']).grid(
-			padx=self.PAD, pady=(self.PAD, 0), row=0, column=1, sticky='w')
-		CTkRadioButton(frame, variable=self.mainframe_user_opts['parttable'],
-			value='gpt', text='GPT').grid(padx=self.PAD, row=1, column=1, sticky='w')
-		CTkRadioButton(frame, variable=self.mainframe_user_opts['parttable'],
-			value='mbr', text='MBR').grid(padx=self.PAD, pady=(0, self.PAD), row=2, column=1, sticky='w')
-		self.mainframe_user_opts['fs'] = StringVar(value=self.conf['DEFAULT']['fs'])
-		CTkRadioButton(frame, variable=self.mainframe_user_opts['fs'],
-			value='ntfs', text='NTFS').grid(padx=self.PAD, pady=(self.PAD, 0), row=0, column=2, sticky='w')
-		CTkRadioButton(frame, variable=self.mainframe_user_opts['fs'],
-			value='exfat', text='exFAT').grid(padx=self.PAD, row=1, column=2, sticky='w')
-		CTkRadioButton(frame, variable=self.mainframe_user_opts['fs'],
-			value='fat32', text='FAT32').grid(padx=self.PAD, pady=(0, self.PAD), row=2, column=2, sticky='w')
-		labeltext = self.conf['TEXT']['volname']
-		CTkLabel(frame, text=f'{labeltext}:').grid(padx=self.PAD, pady=(
-			self.PAD, 0), row=0, column=3, sticky='e')
-		self.mainframe_user_opts['volname'] = StringVar(value=self.conf['DEFAULT']['volname'])
-		CTkEntry(frame, textvariable=self.mainframe_user_opts['volname']).grid(
-			padx=self.PAD, pady=(self.PAD, 0), row=0, column=4, sticky='w')
-		self.mainframe_user_opts['writelog'] = BooleanVar(value=self.conf['DEFAULT']['writelog'])
-		CTkCheckBox(frame, text=self.conf['TEXT']['writelog'], variable=self.mainframe_user_opts['writelog'],
-			onvalue=True, offvalue=False).grid(padx=self.PAD, pady=(0, self.PAD), row=2, column=4, sticky='w')
-		CTkButton(frame, text=self.conf['TEXT']['editlog'],
-			command=self.edit_log_header).grid(padx=self.PAD, pady=(0, self.PAD), row=2, column=3, sticky='w')
 		### DRIVES ###
 		frame = CTkFrame(self.main_frame)
 		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
@@ -376,6 +345,39 @@ class Gui(CTk, WinUtils, Logging):
 			else:
 				button.configure(state=DISABLED)
 			row += 1
+
+
+		### DISK OPTIONS FRAME ###
+		frame = CTkFrame(self.main_frame)
+		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
+		CTkButton(frame, text=self.conf['TEXT']['refresh'],
+			command=self.refresh).grid(padx=self.PAD, pady=(self.PAD,0), row=0, column=0, sticky='w')
+		self.mainframe_user_opts['parttable'] = StringVar(value=self.conf['DEFAULT']['parttable'])
+		CTkRadioButton(frame, variable=self.mainframe_user_opts['parttable'],
+			value='None', text=self.conf['TEXT']['no_diskpart']).grid(
+			padx=self.PAD, pady=(self.PAD, 0), row=0, column=1, sticky='w')
+		CTkRadioButton(frame, variable=self.mainframe_user_opts['parttable'],
+			value='gpt', text='GPT').grid(padx=self.PAD, row=1, column=1, sticky='w')
+		CTkRadioButton(frame, variable=self.mainframe_user_opts['parttable'],
+			value='mbr', text='MBR').grid(padx=self.PAD, pady=(0, self.PAD), row=2, column=1, sticky='w')
+		self.mainframe_user_opts['fs'] = StringVar(value=self.conf['DEFAULT']['fs'])
+		CTkRadioButton(frame, variable=self.mainframe_user_opts['fs'],
+			value='ntfs', text='NTFS').grid(padx=self.PAD, pady=(self.PAD, 0), row=0, column=2, sticky='w')
+		CTkRadioButton(frame, variable=self.mainframe_user_opts['fs'],
+			value='exfat', text='exFAT').grid(padx=self.PAD, row=1, column=2, sticky='w')
+		CTkRadioButton(frame, variable=self.mainframe_user_opts['fs'],
+			value='fat32', text='FAT32').grid(padx=self.PAD, pady=(0, self.PAD), row=2, column=2, sticky='w')
+		labeltext = self.conf['TEXT']['volname']
+		CTkLabel(frame, text=f'{labeltext}:').grid(padx=self.PAD, pady=(
+			self.PAD, 0), row=0, column=3, sticky='e')
+		self.mainframe_user_opts['volname'] = StringVar(value=self.conf['DEFAULT']['volname'])
+		CTkEntry(frame, textvariable=self.mainframe_user_opts['volname']).grid(
+			padx=self.PAD, pady=(self.PAD, 0), row=0, column=4, sticky='w')
+		self.mainframe_user_opts['writelog'] = BooleanVar(value=self.conf['DEFAULT']['writelog'])
+		CTkCheckBox(frame, text=self.conf['TEXT']['writelog'], variable=self.mainframe_user_opts['writelog'],
+			onvalue=True, offvalue=False).grid(padx=self.PAD, pady=(0, self.PAD), row=2, column=4, sticky='w')
+		CTkButton(frame, text=self.conf['TEXT']['editlog'],
+			command=self.edit_log_header).grid(padx=self.PAD, pady=(0, self.PAD), row=2, column=3, sticky='w')
 		### FILE(S) ###
 		CTkRadioButton(
 				frame,
@@ -493,7 +495,7 @@ class Gui(CTk, WinUtils, Logging):
 			if target == 'files':
 				self.init_files()
 			else:
-				self.init_drive(target)
+				self.init_drive(int(target))
 
 	def quit_app(self):
 		'Write config an quit'
@@ -604,17 +606,8 @@ class Gui(CTk, WinUtils, Logging):
 			if info and self.options['writelog']:
 				self.append_log(info)
 
-	def wipe_drive(self):
-		'Only check, do not wipe'
-		pass
-
-	def check_drive(self):
-		'Only check, do not wipe'
-		pass
-
 	def init_drive(self, diskindex):
 		'Wipe selected disk - launch thread'
-		self.decode_settings()
 		drive = self.get_drive(diskindex)
 		question = self.conf['TEXT']['drivewarning']
 		question += f'\n\n{drive.DeviceID}\n{drive.Caption}, {drive.MediaType}\n'
@@ -661,7 +654,10 @@ class Gui(CTk, WinUtils, Logging):
 
 	def work_drive(self):
 		'Do the work with zerod, target is a drve'
-		self.workframe(self.conf['TEXT']['wipedrive'])
+		if self.options['check']:
+			self.workframe(self.conf['TEXT']['checkdrive'])
+		else:
+			self.workframe(self.conf['TEXT']['wipedrive'])
 		self.head_info.set(self.work_target) 
 		self.main_info.set(self.conf['TEXT']['cleaning_table'])
 		self.clean_table(self.work_target)
@@ -669,9 +665,9 @@ class Gui(CTk, WinUtils, Logging):
 			self.work_target,
 			blocksize = self.options['blocksize'],
 			extra = self.options['extra'],
-			writeff = self.options['writeff'],
+			writeff = self.options['ff'],
 			verify = self.options['full_verify'],
-			check = self.options['pure_check']
+			check = self.options['check']
 		)
 		self.watch_zerod()
 		if not self.working:
@@ -721,14 +717,6 @@ class Gui(CTk, WinUtils, Logging):
 		self.progressbar.stop()
 		self.progressbar.configure(mode='determinate')
 		self.progressbar.set(1)
-
-	def wipe_files(self):
-		'Only check, do not wipe'
-		pass
-
-	def check_files(self):
-		'Only check, do not wipe'
-		pass
 
 	def init_files(self):
 		'Wipe selected file or files - launch thread'
@@ -796,11 +784,15 @@ class Gui(CTk, WinUtils, Logging):
 						errors.append(file)
 			else:
 				errors.append(file)
-		self.head_info.set(self.conf['TEXT']['all_done'])
-		#self.main_info.set(self.conf['TEXT']['all_done'])
-		self.progress_info.set('100 %')
+		if qt_files > 1:
+			self.head_info.set(f'{qt_files} ' + self.conf['TEXT']['files'])
+		else:
+			self.head_info.set('1 ' + self.conf['TEXT']['file'])
+		self.main_info.set('')
+		self.progress_info.set(self.conf['TEXT']['all_done'])
 		self.working = False
 		if errors != list():
+			self.main_info.set(self.conf['TEXT']['errorwhile'])
 			showerror(
 				self.conf['TEXT']['error'],
 				self.conf['TEXT']['errorwhile'] + self.list_to_string(errors)
