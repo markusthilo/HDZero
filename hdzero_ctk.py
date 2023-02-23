@@ -18,8 +18,11 @@ from subprocess import Popen, PIPE, STDOUT, STARTUPINFO, STARTF_USESHOWWINDOW
 from time import sleep
 from datetime import datetime
 from threading import Thread
-from tkinter import Tk, Toplevel, StringVar, BooleanVar, PhotoImage, CENTER, NORMAL, DISABLED
-from tkinter.ttk import Frame, Label, Button, Entry, Radiobutton, Checkbutton, Progressbar, OptionMenu
+from customtkinter import CTk, set_appearance_mode, set_default_color_theme
+from customtkinter import CTkToplevel, CTkFrame, CTkLabel, CTkSwitch
+from customtkinter import CTkButton, CTkEntry, CTkRadioButton
+from customtkinter import CTkCheckBox, CTkProgressBar, CTkOptionMenu
+from tkinter import StringVar, BooleanVar, PhotoImage, CENTER, NORMAL, DISABLED
 from tkinter.messagebox import askquestion, showwarning, showerror, showinfo
 from tkinter.filedialog import askopenfilenames, asksaveasfilename
 
@@ -223,12 +226,12 @@ class Logging:
 		proc = Popen(['notepad', self.log_header_path])
 		proc.wait()
 
-class Gui(Tk, WinUtils, Logging):
+class Gui(CTk, WinUtils, Logging):
 	'GUI look and feel'
 
 	PAD = 4
 	SLIMPAD = 2
-	BUTTONWIDTH = 4
+	BUTTONWIDTH = 48
 	LABELWIDTH = 400
 	BARWIDTH = 200
 	BARHEIGHT = 20
@@ -251,7 +254,9 @@ class Gui(Tk, WinUtils, Logging):
 		self.i_am_admin = self.is_user_an_admin()
 		Logging.__init__(self, self.__file_parentpath__)
 		self.app_info_str = self.conf['TEXT']['title'] + f' v{__version__}'
-		Tk.__init__(self)
+		CTk.__init__(self)
+		set_appearance_mode(self.conf['APPEARANCE']['mode'])
+		set_default_color_theme(self.conf['APPEARANCE']['color_theme'])
 		self.title(self.app_info_str)
 		self.app_icon = PhotoImage(file=self.__file_parentpath__/'icon.png')
 		self.iconphoto(False, self.app_icon)
@@ -304,30 +309,30 @@ class Gui(Tk, WinUtils, Logging):
 			self.main_frame.destroy()
 		except AttributeError:
 			pass
-		self.main_frame = Frame(self)
+		self.main_frame = CTkFrame(self)
 		self.main_frame.pack()
-		head_frame = Frame(self.main_frame)
+		head_frame = CTkFrame(self.main_frame)
 		head_frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
-		Label(head_frame, text=self.conf['TEXT']['head']).pack(
+		CTkLabel(head_frame, text=self.conf['TEXT']['head']).pack(
 			padx=2*self.PAD, pady=self.PAD, side='left')
 		if not self.i_am_admin:
-			frame = Frame(self.main_frame, fg_color=self.WARNING_BG)
+			frame = CTkFrame(self.main_frame, fg_color=self.WARNING_BG)
 			frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
-			Label(
+			CTkLabel(
 				frame,
 				text=self.conf['TEXT']['notadmin'],
 				fg_color=self.WARNING_BG,
 				text_color=self.WARNING_FG
-			).pack(padx=2*self.PAD, pady=self.PAD, side='left')
+			).pack(padx=2*self.PAD, pady=self.PAD, side='left')	
 		### DRIVES ###
-		self.drives_frame = Frame(self.main_frame)
+		self.drives_frame = CTkFrame(self.main_frame)
 		self.drives_frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
 		self.selected_target = StringVar()
 		self.fill_drives_frame()
 		### FILE(S) ###
-		frame = Frame(self.main_frame)
+		frame = CTkFrame(self.main_frame)
 		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
-		Radiobutton(
+		CTkRadioButton(
 				frame,
 				text = self.conf['TEXT']['files'],
 				command = self.enable_start_button,
@@ -336,14 +341,13 @@ class Gui(Tk, WinUtils, Logging):
 				value = 'files'
 		).pack(padx=self.PAD, pady=self.PAD, side='left')
 		self.mainframe_user_opts['deletefiles'] = BooleanVar(value=self.conf['DEFAULT']['deletefiles'])
-		Checkbutton(
+		CTkCheckBox(
 			frame,
 			text = self.conf['TEXT']['deletefiles'],
 			variable = self.mainframe_user_opts['deletefiles'],
 			onvalue = True,
 			offvalue = False
 		).pack(padx=self.PAD, pady=self.PAD, side='right')
-		return
 		### DISK OPTIONS FRAME ###
 		frame = CTkFrame(self.main_frame)
 		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
@@ -446,29 +450,38 @@ class Gui(Tk, WinUtils, Logging):
 
 	def fill_drives_frame(self):
 		'Drive section'
-		Label(self.drives_frame, text=self.conf['TEXT']['drive']).grid(padx=self.PAD, row=0, column=0, sticky='w')
-		Label(self.drives_frame, text=self.conf['TEXT']['mounted']).grid(padx=self.PAD, row=0, column=1, sticky='w')
-		Label(self.drives_frame, text=self.conf['TEXT']['details']).grid(padx=self.PAD, row=0, column=2, sticky='w')
+		CTkLabel(self.drives_frame, text=self.conf['TEXT']['drive']).grid(padx=self.PAD, row=0, column=0, sticky='w')
+		CTkLabel(self.drives_frame, text=self.conf['TEXT']['mounted']).grid(padx=self.PAD, row=0, column=1, sticky='w')
+		CTkLabel(self.drives_frame, text=self.conf['TEXT']['details']).grid(padx=self.PAD, row=0, column=2, sticky='w')
 		row = 1
 		for drive in self.list_drives():
-			button = Radiobutton(
+			button = CTkRadioButton(
 				self.drives_frame,
 				text = f'{drive.index}',
 				command = self.enable_start_button,
+				width = self.BUTTONWIDTH,
 				variable = self.selected_target,
 				value = drive.index
 			)
 			button.grid(padx=self.PAD, row=row, column=0, sticky='w')
 			partitions = [ part.Dependent.DeviceID for part in self.get_partitions(drive.index) ]
-			p_label = Label(self.drives_frame, text=', '.join(partitions))
+			p_label = CTkLabel(self.drives_frame, text=', '.join(partitions))
 			p_label.grid(padx=self.PAD, row=row, column=1, sticky='w')
-			Label(
+			i_label = CTkLabel(
 				self.drives_frame,
 				text = f'{drive.Caption}, {drive.MediaType} ({self.readable(self.zerod_get_size(drive.DeviceID))})'
-			).grid(padx=self.PAD, row=row, column=2, sticky='w')
+			)
+			i_label.grid(padx=self.PAD, row=row, column=2, sticky='w')
 			if self.i_am_admin:
 				if self.this_drive in partitions or 'C:' in partitions:
-					p_label.configure(foreground=self.WARNING_FG, background=self.WARNING_BG)
+					button.configure(
+						text_color = self.WARNING_FG,
+						fg_color = self.WARNING_FG,
+						border_color = self.WARNING_FG,
+						hover_color = self.WARNING_FG
+					)
+					p_label.configure(text_color=self.WARNING_FG)
+					i_label.configure(text_color=self.WARNING_FG)
 			else:
 				button.configure(state=DISABLED)
 			row += 1
