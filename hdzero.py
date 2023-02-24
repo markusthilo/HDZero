@@ -46,6 +46,20 @@ class WinUtils:
 	WINCMD_TIMEOUT = 20
 	WINCMD_RETRIES = 20
 	WINCMD_DELAY = 1
+	BLOCKSIZES = (
+		'auto',
+		'512',
+		'1024',
+		'2048',
+		'4096',
+		'8192',
+		'16384',
+		'32768',
+		'65536',
+		'131072',
+		'262144',
+		'524288'
+	)
 
 	def __init__(self, parentpath):
 		'Generate Windows tools'
@@ -227,8 +241,6 @@ class Gui(Tk, WinUtils, Logging):
 	'GUI look and feel'
 
 	PAD = 4
-	SLIMPAD = 2
-	BUTTONWIDTH = 4
 	LABELWIDTH = 400
 	BARWIDTH = 200
 	BARHEIGHT = 20
@@ -295,7 +307,7 @@ class Gui(Tk, WinUtils, Logging):
 		for child in frame.winfo_children():
 			try:
 				child.configure(state=DISABLED)
-			except ValueError:
+			except:
 				pass
 
 	def gen_main_frame(self):
@@ -306,149 +318,154 @@ class Gui(Tk, WinUtils, Logging):
 			pass
 		self.main_frame = Frame(self)
 		self.main_frame.pack()
-		head_frame = Frame(self.main_frame)
-		head_frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
-		Label(head_frame, text=self.conf['TEXT']['head']).pack(
-			padx=2*self.PAD, pady=self.PAD, side='left')
+		### HEAD ###
+		frame = Frame(self.main_frame)
+		frame.pack(fill='both', expand=True)
+		Label(
+			frame,
+			text = self.conf['TEXT']['head'],
+			padding = self.PAD
+		).pack(fill='both', expand=True, side='left')
 		if not self.i_am_admin:
-			frame = Frame(self.main_frame, fg_color=self.WARNING_BG)
-			frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
+			frame = Frame(self.main_frame)
+			frame.pack(fill='both', expand=True)
 			Label(
 				frame,
-				text=self.conf['TEXT']['notadmin'],
-				fg_color=self.WARNING_BG,
-				text_color=self.WARNING_FG
-			).pack(padx=2*self.PAD, pady=self.PAD, side='left')
+				text = self.conf['TEXT']['notadmin'],
+				foreground = self.WARNING_FG,
+				background = self.WARNING_BG,
+				padding=self.PAD
+			).pack(fill='both', expand=True, side='left')
 		### DRIVES ###
-		self.drives_frame = Frame(self.main_frame)
-		self.drives_frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
+		self.drives_frame = Frame(self.main_frame, padding=self.PAD)
+		self.drives_frame.pack(fill='both', expand=True)
 		self.selected_target = StringVar()
 		self.fill_drives_frame()
 		### FILE(S) ###
 		frame = Frame(self.main_frame)
-		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
+		frame.pack(fill='both', expand=True)
 		Radiobutton(
 				frame,
 				text = self.conf['TEXT']['files'],
 				command = self.enable_start_button,
-				width = self.BUTTONWIDTH,
 				variable = self.selected_target,
-				value = 'files'
-		).pack(padx=self.PAD, pady=self.PAD, side='left')
+				value = 'files',
+				padding = (self.PAD*2, 0)
+		).pack(side='left')
 		self.mainframe_user_opts['deletefiles'] = BooleanVar(value=self.conf['DEFAULT']['deletefiles'])
 		Checkbutton(
 			frame,
 			text = self.conf['TEXT']['deletefiles'],
 			variable = self.mainframe_user_opts['deletefiles'],
 			onvalue = True,
-			offvalue = False
-		).pack(padx=self.PAD, pady=self.PAD, side='right')
-		return
+			offvalue = False,
+			padding = (self.PAD*2, 0)
+		).pack(side='right')
 		### DISK OPTIONS FRAME ###
-		frame = CTkFrame(self.main_frame)
-		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
-		CTkButton(frame, text=self.conf['TEXT']['refresh'],
-			command=self.refresh_drives_frame).grid(padx=self.PAD, pady=(self.PAD,0), row=0, column=0, sticky='w')
+		frame = Frame(self.main_frame, padding=self.PAD)
+		frame.pack(fill='both', expand=True)
+		Button(frame, text=self.conf['TEXT']['refresh'],
+			command=self.refresh_drives_frame).grid(row=0, column=0, sticky='w')
 		self.mainframe_user_opts['parttable'] = StringVar(value=self.conf['DEFAULT']['parttable'])
-		CTkRadioButton(frame, variable=self.mainframe_user_opts['parttable'],
-			value='None', text=self.conf['TEXT']['no_diskpart']).grid(
-			padx=self.PAD, pady=(self.PAD, 0), row=0, column=1, sticky='w')
-		CTkRadioButton(frame, variable=self.mainframe_user_opts['parttable'],
-			value='gpt', text='GPT').grid(padx=self.PAD, row=1, column=1, sticky='w')
-		CTkRadioButton(frame, variable=self.mainframe_user_opts['parttable'],
-			value='mbr', text='MBR').grid(padx=self.PAD, pady=(0, self.PAD), row=2, column=1, sticky='w')
+		Radiobutton(frame, variable=self.mainframe_user_opts['parttable'], value='None',
+			text=self.conf['TEXT']['no_diskpart'], padding=(self.PAD*4, 0)).grid(row=0, column=1, sticky='w')
+		Radiobutton(frame, variable=self.mainframe_user_opts['parttable'],
+			value='gpt',
+			text='GPT', padding=(self.PAD*4, 0)).grid(row=1, column=1, sticky='w')
+		Radiobutton(frame, variable=self.mainframe_user_opts['parttable'],
+			value='mbr',
+			text='MBR', padding=(self.PAD*4, 0)).grid(row=2, column=1, sticky='w')
 		self.mainframe_user_opts['fs'] = StringVar(value=self.conf['DEFAULT']['fs'])
-		CTkRadioButton(frame, variable=self.mainframe_user_opts['fs'],
-			value='ntfs', text='NTFS').grid(padx=self.PAD, pady=(self.PAD, 0), row=0, column=2, sticky='w')
-		CTkRadioButton(frame, variable=self.mainframe_user_opts['fs'],
-			value='exfat', text='exFAT').grid(padx=self.PAD, row=1, column=2, sticky='w')
-		CTkRadioButton(frame, variable=self.mainframe_user_opts['fs'],
-			value='fat32', text='FAT32').grid(padx=self.PAD, pady=(0, self.PAD), row=2, column=2, sticky='w')
-		labeltext = self.conf['TEXT']['volname']
-		CTkLabel(frame, text=f'{labeltext}:').grid(padx=self.PAD, pady=(
-			self.PAD, 0), row=0, column=3, sticky='e')
+		Radiobutton(frame, variable=self.mainframe_user_opts['fs'],
+			value='ntfs', text='NTFS', padding=(self.PAD*2, 0)).grid(row=0, column=2, sticky='w')
+		Radiobutton(frame, variable=self.mainframe_user_opts['fs'],
+			value='exfat', text='exFAT', padding=(self.PAD*2, 0)).grid(row=1, column=2, sticky='w')
+		Radiobutton(frame, variable=self.mainframe_user_opts['fs'],
+			value='fat32', text='FAT32', padding=(self.PAD*2, 0)).grid(row=2, column=2, sticky='w')
+		Label(frame, text=self.conf['TEXT']['volname']+':', padding=(self.PAD, 0)
+			).grid(row=0, column=3, sticky='e')
 		self.mainframe_user_opts['volname'] = StringVar(value=self.conf['DEFAULT']['volname'])
-		CTkEntry(frame, textvariable=self.mainframe_user_opts['volname']).grid(
-			padx=self.PAD, pady=(self.PAD, 0), row=0, column=4, sticky='w')
+		Entry(frame, textvariable=self.mainframe_user_opts['volname']).grid(row=0, column=4, sticky='w')
 		self.mainframe_user_opts['writelog'] = BooleanVar(value=self.conf['DEFAULT']['writelog'])
-		CTkCheckBox(frame, text=self.conf['TEXT']['writelog'], variable=self.mainframe_user_opts['writelog'],
-			onvalue=True, offvalue=False).grid(padx=self.PAD, pady=(0, self.PAD), row=2, column=4, sticky='w')
-		CTkButton(frame, text=self.conf['TEXT']['editlog'],
-			command=self.edit_log_header).grid(padx=self.PAD, pady=(0, self.PAD), row=2, column=3, sticky='w')
+		Checkbutton(frame, text=self.conf['TEXT']['writelog'], variable=self.mainframe_user_opts['writelog'],
+			onvalue=True, offvalue=False, padding=(self.PAD, 0)).grid(row=2, column=3, sticky='w')
+		Button(frame, text=self.conf['TEXT']['editlog'],
+			command=self.edit_log_header).grid(row=2, column=4, sticky='w')
 		### OPTIONS FRAME ###
-		frame = CTkFrame(self.main_frame)
-		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
+		frame = Frame(self.main_frame, padding=self.PAD)
+		frame.pack(fill='both', expand=True)
 		self.mainframe_user_opts['extra'] = BooleanVar(value=self.conf['DEFAULT']['extra'])
-		CTkCheckBox(
+		Checkbutton(
 			frame,
 			text = self.conf['TEXT']['extra'],
-			width = self.BUTTONWIDTH,
 			variable = self.mainframe_user_opts['extra'],
 			onvalue = True,
-			offvalue=False
-		).grid(padx=self.PAD, row=0, column=0, sticky='w')
+			offvalue = False,
+			padding = (self.PAD, 0)
+		).grid(row=0, column=0, sticky='w')
 		self.mainframe_user_opts['ff'] = BooleanVar(value=self.conf['DEFAULT']['ff'])
-		CTkCheckBox(
+		Checkbutton(
 			frame,
 			text = self.conf['TEXT']['ff'],
-			width = self.BUTTONWIDTH,
 			variable = self.mainframe_user_opts['ff'],
-			onvalue=True,
-			offvalue=False
-		).grid(padx=self.PAD, row=0, column=1, sticky='w')
+			onvalue = True,
+			offvalue = False,
+			padding = (self.PAD, 0)
+		).grid(row=0, column=1, sticky='w')
 		self.mainframe_user_opts['full_verify'] = BooleanVar(value=self.conf['DEFAULT']['full_verify'])
-		CTkCheckBox(
+		Checkbutton(
 			frame,
 			text = self.conf['TEXT']['full_verify'],
-			width = self.BUTTONWIDTH,
 			variable = self.mainframe_user_opts['full_verify'],
-			onvalue=True,
-			offvalue=False
-		).grid(padx=self.PAD, row=0, column=0, sticky='w')
-		CTkLabel(frame, text='').grid(padx=self.PAD, row=0, column=3, sticky='w')
-		CTkLabel(frame, text=self.conf['TEXT']['blocksize']).grid(padx=self.PAD, row=0, column=4, sticky='w')
+			onvalue = True,
+			offvalue = False,
+			padding = (self.PAD, 0)
+		).grid(row=0, column=3, sticky='w')
+		Label(frame, text=self.conf['TEXT']['blocksize']+':', padding = (self.PAD, 0)
+			).grid(row=0, column=4, sticky='w')
 		self.mainframe_user_opts['blocksize'] = StringVar(value=self.conf['DEFAULT']['blocksize'])
-		blocksizes = ['auto'] + [ str(2**p) for p in range(9, 20) ]
-		blocksizes.remove(self.conf['DEFAULT']['blocksize'])
-		blocksizes = [self.conf['DEFAULT']['blocksize']] + blocksizes
-		drop = CTkOptionMenu(master=frame, variable=self.mainframe_user_opts['blocksize'],
-			dynamic_resizing=False, values=blocksizes)
-		drop.grid(padx=self.PAD, row=0, column=5, sticky='w')
+		OptionMenu(
+			frame,
+			self.mainframe_user_opts['blocksize'],
+			self.conf['DEFAULT']['blocksize'],
+			*self.BLOCKSIZES
+		).grid(row=0, column=5, sticky='w')
 		self.mainframe_user_opts['check'] = BooleanVar(value=self.conf['DEFAULT']['check'])
-		CTkCheckBox(
+		Checkbutton(
 			frame,
 			text = self.conf['TEXT']['check'],
-			width = self.BUTTONWIDTH,
 			variable = self.mainframe_user_opts['check'],
 			onvalue = True,
-			offvalue = False
-		).grid(padx=self.PAD, row=1, column=0, sticky='w')
+			offvalue = False,
+			padding = (self.PAD, 0)
+		).grid(row=1, column=0, sticky='w')
+		### ASK MORE ###
+		frame = Frame(self.main_frame, padding=self.PAD)
+		frame.pack(fill='both', expand=True)
 		self.mainframe_user_opts['askmore'] = BooleanVar(value=self.conf['DEFAULT']['askmore'])
-		CTkCheckBox(
+		Checkbutton(
 			frame,
 			text = self.conf['TEXT']['askmore'],
-			width = self.BUTTONWIDTH,
 			variable = self.mainframe_user_opts['askmore'],
 			onvalue = True, offvalue = False
-		).grid(padx=self.PAD, row=1, column=1, sticky='w')
+		).pack(side='right')
 		### BOTTOM ###
-		frame = CTkFrame(self.main_frame)
-		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
-		self.start_button = CTkButton(
+		frame = Frame(self.main_frame, padding=self.PAD)
+		frame.pack(fill='both', expand=True)
+		self.start_button = Button(
 			frame,
 			text = self.conf['TEXT']['start'],
 			command = self.start_work,
 			state = DISABLED
 		)
-		self.start_button.pack(padx=self.PAD, pady=self.PAD, side='left')
-		CTkButton(frame, text=self.conf['TEXT']['quit'], command=self.quit_app).pack(
-			padx=self.PAD, pady=self.PAD, side='right')
+		self.start_button.pack(side='left')
+		Button(frame, text=self.conf['TEXT']['quit'], command=self.quit_app).pack(side='right')
 
 	def fill_drives_frame(self):
 		'Drive section'
-		Label(self.drives_frame, text=self.conf['TEXT']['drive']).grid(padx=self.PAD, row=0, column=0, sticky='w')
-		Label(self.drives_frame, text=self.conf['TEXT']['mounted']).grid(padx=self.PAD, row=0, column=1, sticky='w')
-		Label(self.drives_frame, text=self.conf['TEXT']['details']).grid(padx=self.PAD, row=0, column=2, sticky='w')
+		Label(self.drives_frame, text=self.conf['TEXT']['drive']).grid(row=0, column=0, sticky='w')
+		Label(self.drives_frame, text=self.conf['TEXT']['mounted']).grid(row=0, column=1, sticky='w')
+		Label(self.drives_frame, text=self.conf['TEXT']['details']).grid(row=0, column=2, sticky='w')
 		row = 1
 		for drive in self.list_drives():
 			button = Radiobutton(
@@ -456,16 +473,17 @@ class Gui(Tk, WinUtils, Logging):
 				text = f'{drive.index}',
 				command = self.enable_start_button,
 				variable = self.selected_target,
-				value = drive.index
+				value = drive.index,
+				padding=(self.PAD, 0)
 			)
-			button.grid(padx=self.PAD, row=row, column=0, sticky='w')
+			button.grid(row=row, column=0, sticky='w')
 			partitions = [ part.Dependent.DeviceID for part in self.get_partitions(drive.index) ]
 			p_label = Label(self.drives_frame, text=', '.join(partitions))
-			p_label.grid(padx=self.PAD, row=row, column=1, sticky='w')
+			p_label.grid(row=row, column=1, sticky='w')
 			Label(
 				self.drives_frame,
 				text = f'{drive.Caption}, {drive.MediaType} ({self.readable(self.zerod_get_size(drive.DeviceID))})'
-			).grid(padx=self.PAD, row=row, column=2, sticky='w')
+			).grid(row=row, column=2, sticky='w')
 			if self.i_am_admin:
 				if self.this_drive in partitions or 'C:' in partitions:
 					p_label.configure(foreground=self.WARNING_FG, background=self.WARNING_BG)
@@ -503,8 +521,8 @@ class Gui(Tk, WinUtils, Logging):
 		target = self.selected_target.get()
 		if target:
 			self.decode_settings()
-			self.disable_frame(self.main_frame)
-			self.quit_work = False
+			#self.disable_frame(self.main_frame)
+			#self.quit_work = False
 			if target == 'files':
 				self.init_files_init()
 			else:
@@ -531,20 +549,20 @@ class Gui(Tk, WinUtils, Logging):
 	def open_work_frame(self):
 		'Open frame to show progress and iconify main frame'
 		self.withdraw()
-		self.work_frame = CTkToplevel(self)
+		self.work_frame = Toplevel(self)
 		self.work_frame.iconphoto(False, self.app_icon)
 		self.work_frame.title(self.app_info_str)
 		self.work_frame.resizable(False, False)
-		frame = CTkFrame(self.work_frame)
+		frame = Frame(self.work_frame)
 		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
 		self.head_info = StringVar()
-		CTkLabel(frame, textvariable=self.head_info, width=self.LABELWIDTH).pack(
+		Label(frame, textvariable=self.head_info, width=self.LABELWIDTH).pack(
 			padx=self.PAD, pady=self.PAD)
 		self.main_info = StringVar()
-		CTkLabel(frame, textvariable=self.main_info).pack(padx=self.PAD, pady=self.PAD)
+		Label(frame, textvariable=self.main_info).pack(padx=self.PAD, pady=self.PAD)
 		self.progress_info = StringVar(value='0 %')
-		CTkLabel(frame, textvariable=self.progress_info).pack(padx=self.PAD, pady=self.PAD)
-		self.progressbar = CTkProgressBar(
+		Label(frame, textvariable=self.progress_info).pack(padx=self.PAD, pady=self.PAD)
+		self.progressbar = Progressbar(
 			master = frame,
 			width = self.BARWIDTH,
 			height = self.BARHEIGHT,
