@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 __author__ = 'Markus Thilo'
-__version__ = '1.0.1-0001_2023-02-23'
+__version__ = '1.0.1-0001_2023-02-27'
 __license__ = 'GPL-3'
 __email__ = 'markus.thilo@gmail.com'
 __status__ = 'Release'
@@ -241,11 +241,7 @@ class Gui(Tk, WinUtils, Logging):
 	'GUI look and feel'
 
 	PAD = 4
-	LABELWIDTH = 400
-	BARWIDTH = 200
-	BARHEIGHT = 20
-	LETTERWIDTH = 28
-	CORNER_RADIUS = 6
+	BARLENGTH = 400
 	WARNING_FG = 'red'
 	WARNING_BG = 'white'
 	
@@ -521,10 +517,8 @@ class Gui(Tk, WinUtils, Logging):
 		target = self.selected_target.get()
 		if target:
 			self.decode_settings()
-			#self.disable_frame(self.main_frame)
-			#self.quit_work = False
 			if target == 'files':
-				self.init_files_init()
+				self.files_init()
 			else:
 				self.drive_init(int(target))
 
@@ -551,37 +545,32 @@ class Gui(Tk, WinUtils, Logging):
 		self.withdraw()
 		self.work_frame = Toplevel(self)
 		self.work_frame.iconphoto(False, self.app_icon)
-		self.work_frame.title(self.app_info_str)
+		self.work_frame.title(self.conf['TEXT']['title'])
 		self.work_frame.resizable(False, False)
 		frame = Frame(self.work_frame)
-		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
+		frame.pack(fill='both', expand=True)
 		self.head_info = StringVar()
-		Label(frame, textvariable=self.head_info, width=self.LABELWIDTH).pack(
-			padx=self.PAD, pady=self.PAD)
+		Label(frame, textvariable=self.head_info).pack(padx=self.PAD, pady=self.PAD)
 		self.main_info = StringVar()
 		Label(frame, textvariable=self.main_info).pack(padx=self.PAD, pady=self.PAD)
-		self.progress_info = StringVar(value='0 %')
-		Label(frame, textvariable=self.progress_info).pack(padx=self.PAD, pady=self.PAD)
-		self.progressbar = Progressbar(
-			master = frame,
-			width = self.BARWIDTH,
-			height = self.BARHEIGHT,
-			border_width = self.SLIMPAD
-		)
-		self.progressbar.set(0)
+		self.progressbar = Progressbar(frame, mode='indeterminate', length=self.BARLENGTH)
 		self.progressbar.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
-		self.quit_button = CTkButton(frame, text=self.conf['TEXT']['quit'], command=self.set_quit_work)
-		self.quit_button.pack(
-			padx=self.PAD, pady=self.PAD, side='right')
+		self.progressbar.start()
+		self.progress_info = StringVar()
+		Label(frame, textvariable=self.progress_info).pack(padx=self.PAD, pady=self.PAD)
+		self.quit_button = Button(
+			frame,
+			text = self.conf['TEXT']['quit'],
+			command = self.set_quit_work
+		)
+		self.quit_button.pack(padx=self.PAD, pady=self.PAD, side='right')
+		self.quit_work = False
 
 	def close_work_frame(self):
 		'Close work frame and show main'
-		#self.deiconify()
-		try:	# no clue why destroy throws errors!
-			self.work_frame.destroy()
-		except:
-			pass
-		self.mainframe()
+		self.deiconify()
+		self.refresh_drives_frame()
+		self.work_frame.destroy()
 
 	def set_quit_work(self):
 		'Write config an quit'
@@ -592,11 +581,7 @@ class Gui(Tk, WinUtils, Logging):
 	def watch_zerod(self, files_of_str = ''):
 		'Handle output of zerod'
 		of_str = self.conf['TEXT']['of']
-		pass_str = self.conf['TEXT']['pass']
 		bytes_str = self.conf['TEXT']['bytes']
-		testing_blocksize_str = self.conf['TEXT']['testing_blocksize']
-		using_blocksize_str = self.conf['TEXT']['using_blocksize']
-		verified_str = self.conf['TEXT']['verified']
 		are_str = self.conf['TEXT']['are']
 		pass_of_str = ''
 		for msg_raw in self.zerod_proc.stdout:
@@ -610,23 +595,23 @@ class Gui(Tk, WinUtils, Logging):
 				progress_str = files_of_str + pass_of_str + ' '
 				progress_str += f'{msg_split[1]} {of_str} {msg_split[3]} {bytes_str}'
 				self.progress_info.set(progress_str)
-				self.progressbar.set(float(msg_split[1]) / float(msg_split[3]))
+				self.progressbar['value'] = 100 * float(msg_split[1]) / float(msg_split[3])
 			elif msg_split[0] == 'Calculating':
 				continue
 			elif msg_split[0] == 'Pass':
 				if self.options['extra']:
-					pass_of_str = f'{pass_str} {msg_split[1]} {of_str} {msg_split[3]}'
+					pass_of_str = self.conf['TEXT']['pass'] + f' {msg_split[1]} {of_str} {msg_split[3]}'
 			elif msg_split[0] == 'Testing':
-				self.main_info.set(f'{testing_blocksize_str} {msg_split[3]} {bytes_str}')
+				self.main_info.set(self.conf['TEXT']['testing_blocksize'] + f' {msg_split[3]} {bytes_str}')
 			elif msg_split[0] == 'Using':
 				self.blocksize = msg_split[4]
-				self.main_info.set(f'{using_blocksize_str} {self.blocksize} {bytes_str}')
+				self.main_info.set(self.conf['TEXT']['using_blocksize'] + f' {self.blocksize} {bytes_str}')
 			elif msg_split[0] == 'Verifying':
 				pass_of_str = ''
 				info = self.conf['TEXT']['verifying']
 				self.main_info.set(info)
 			elif msg_split[0] == 'Verified':
-				info = f'{verified_str} {msg_split[1]} {bytes_str}'
+				info = self.conf['TEXT']['verified'] + f' {msg_split[1]} {bytes_str}'
 				self.main_info.set(info)
 			elif msg_split[0] == 'All':
 				info = f'{msg_split[2]} {bytes_str} {are_str} {msg_split[5]}'
@@ -677,25 +662,25 @@ class Gui(Tk, WinUtils, Logging):
 		else:
 			self.driveletter = None
 		if self.options['writelog']:
-			self.start_log(f'{self.app_info_str}\n{drive.Caption}, {drive.MediaType}, {self.readable(drive.Size)}')
+			self.start_log(
+				f'{self.app_info_str}\n{drive.Caption}, {drive.MediaType}, {self.readable(drive.Size)}'
+			)
 		self.work_target = drive.DeviceID
+		self.open_work_frame()
 		Thread(target=self.drive_worker).start()
 
 	def drive_worker(self):
 		'Worker for drive'
-		self.open_work_frame()
 		self.head_info.set(self.work_target)
 		if not self.options['check']:
 			self.main_info.set(self.conf['TEXT']['cleaning_table'])
-			self.progressbar.configure(mode="indeterminate")
-			self.progressbar.start()
 			self.clean_table(self.work_target)
-			self.progressbar.stop()
-			self.progressbar.configure(mode='determinate')
-			self.progressbar.set(0)
 		if self.quit_work:
 			self.close_work_frame()
 			return
+		self.progressbar.stop()
+		self.progressbar.configure(mode='determinate')
+		self.progressbar['value'] = 0
 		self.zerod_proc = self.zerod_launch(
 			self.work_target,
 			blocksize = self.options['blocksize'],
@@ -738,6 +723,11 @@ class Gui(Tk, WinUtils, Logging):
 					title = self.conf['TEXT']['warning_title'],
 					message = self.conf['TEXT']['couldnotcreate']
 				)
+			self.progressbar.stop()
+			self.progressbar.configure(mode='determinate')
+		self.progressbar['value'] = 100
+		self.main_info.set('')
+		self.progress_info.set('')
 		if self.options['writelog']:
 			self.log_timestamp()
 			logpath = None
@@ -748,11 +738,7 @@ class Gui(Tk, WinUtils, Logging):
 				if filename:
 					logpath = Path(filename)
 			self.write_log(logpath)
-		self.main_info.set('')
-		self.progress_info.set('')
-		self.progressbar.stop()
-		self.progressbar.configure(mode='determinate')
-		self.progressbar.set(1)
+		self.main_info.set(self.conf['TEXT']['all_done'])
 		showinfo(message=self.conf['TEXT']['all_done'])
 		self.close_work_frame()
 
@@ -780,23 +766,23 @@ class Gui(Tk, WinUtils, Logging):
 		self.conf['DEFAULT']['initialdir'] = str(Path(self.work_target[0]).parent)
 		self.decode_settings()
 		self.options['writelog'] = False
-		self.work_files_thread = Thread(target=self.worker_files_worker).start()
+		self.open_work_frame()
+		Thread(target=self.files_worker).start()
 
 	def files_worker(self):
 		'Worker for files'
-		if self.options['check']:
-			self.workframe(self.conf['TEXT']['checkfile'])
-		else:
-			self.workframe(self.conf['TEXT']['wipefile'])
 		of_str = self.conf['TEXT']['of']
-		file_str = self.conf['TEXT']['file']
 		files_of_str = ''
 		qt_files = len(self.work_target)
 		file_cnt = 0
 		errors = list()
 		self.blocksize = self.options['blocksize']
 		for file in self.work_target:
+		
+			print('DEBUG:', file, type(file))
+		
 			self.head_info.set(file)
+			return
 			self.zerod_proc = self.zerod_launch(
 				file,
 				blocksize = self.blocksize,
@@ -807,7 +793,7 @@ class Gui(Tk, WinUtils, Logging):
 			)
 			if qt_files > 1:
 				file_cnt += 1
-				files_of_str = f'{file_str} {file_cnt} {of_str} {qt_files}, '
+				files_of_str = self.conf['TEXT']['file'] + f' {file_cnt} {of_str} {qt_files}, '
 			self.watch_zerod(files_of_str=files_of_str)
 			if not self.working:
 				return
@@ -834,6 +820,8 @@ class Gui(Tk, WinUtils, Logging):
 				self.conf['TEXT']['error'],
 				self.conf['TEXT']['errorwhile'] + self.list_to_string(errors)
 			)
+		#self.main_info.set(self.conf['TEXT']['all_done'])
+		#showinfo(message=self.conf['TEXT']['all_done'])
 		self.close_work_frame()
 
 if __name__ == '__main__':  # start here

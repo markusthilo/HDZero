@@ -5,7 +5,7 @@
 /* License: GPL-3 */
 
 /* Version */
-const char *VERSION = "1.0.1_20230215";
+const char *VERSION = "1.0.1_20230227";
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -602,9 +602,10 @@ int main(int argc, char **argv) {
 		free(byteblock);
 	}
 	/* Verify */
-	printf("Verifying %s\n", argv[1]);
+	printf("Verifying %s", argv[1]);
 	fflush(stdout);
 	if ( full_verify ) {	// full verify checks every byte
+		printf("Verifying %s - full verify\n");
 		target.Pointer = 0;
 		set_pointer(target);	// start verification at first byte
 		target = verify_blocks(target, blocksize, zeroff);
@@ -613,7 +614,7 @@ int main(int argc, char **argv) {
 		printf("... %lld of %lld bytes\n", target.Pointer, target.Size);
 		printf("Verified all %lld bytes\n", target.Pointer);
 		fflush(stdout);
-	}
+	} else printf("\n");
 	target.Pointer = 0;	// print first block
 	target = print_block(target, zeroff);
 	LONGLONG halfblocks = target.Size / ( MINBLOCKSIZE << 1 );	// block in the middle?
