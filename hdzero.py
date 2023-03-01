@@ -776,16 +776,13 @@ class Gui(Tk, WinUtils, Logging):
 		qt_files = len(self.work_target)
 		file_cnt = 0
 		errors = list()
-		self.blocksize = self.options['blocksize']
+		self.progressbar.stop()
+		self.progressbar.configure(mode='determinate')
 		for file in self.work_target:
-		
-			print('DEBUG:', file, type(file))
-		
 			self.head_info.set(file)
-			return
 			self.zerod_proc = self.zerod_launch(
 				file,
-				blocksize = self.blocksize,
+				blocksize = self.options['blocksize'],
 				extra = self.options['extra'],
 				writeff = self.options['ff'],
 				verify = self.options['full_verify'],
@@ -795,8 +792,10 @@ class Gui(Tk, WinUtils, Logging):
 				file_cnt += 1
 				files_of_str = self.conf['TEXT']['file'] + f' {file_cnt} {of_str} {qt_files}, '
 			self.watch_zerod(files_of_str=files_of_str)
-			if not self.working:
-				return
+			if self.quit_work:
+				self.zerod_proc.terminate()
+				self.close_work_frame()
+			return
 			if self.zerod_proc.wait() == 0:
 				if self.options['deletefiles'] and not self.options['check']:
 					self.main_info.set(self.conf['TEXT']['deleting_file'])
@@ -806,6 +805,10 @@ class Gui(Tk, WinUtils, Logging):
 						errors.append(file)
 			else:
 				errors.append(file)
+		
+		self.progressbar.stop()
+		self.progressbar.configure(mode='determinate')
+		
 		if qt_files > 1:
 			self.head_info.set(f'{qt_files} ' + self.conf['TEXT']['files'])
 		else:
@@ -820,8 +823,6 @@ class Gui(Tk, WinUtils, Logging):
 				self.conf['TEXT']['error'],
 				self.conf['TEXT']['errorwhile'] + self.list_to_string(errors)
 			)
-		#self.main_info.set(self.conf['TEXT']['all_done'])
-		#showinfo(message=self.conf['TEXT']['all_done'])
 		self.close_work_frame()
 
 if __name__ == '__main__':  # start here

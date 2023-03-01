@@ -19,11 +19,12 @@ except FileNotFoundError:
 	pass
 run(['gcc', '-o', 'zerod.exe', 'zerod.c'])
 PyInstaller.__main__.run([
-    'hdzero.py',
-    '--onedir',
-    '--windowed',
+	'hdzero.py',
+#	'--onedir',
+	'--onefile',	
 	'--icon', 'icon.ico',
-	'--add-data', f'{__ctk__};customtkinter/'
+#	'--add-data', f'{__ctk__};customtkinter/',
+	'--windowed'
 ])
 for srcfile in 'zerod.exe', 'icon.png', 'hdzero.conf', 'logheader.txt':
 	copy(srcfile, __hdzero__/srcfile)
