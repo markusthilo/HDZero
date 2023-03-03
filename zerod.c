@@ -5,7 +5,7 @@
 /* License: GPL-3 */
 
 /* Version */
-const char *VERSION = "1.0.1_20230302";
+const char *VERSION = "1.0.1_20230303";
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -225,7 +225,7 @@ Z_TARGET selective_write_blocks(Z_TARGET target, BYTE *wbblock, DWORD blocksize)
 	char bytesof[32];	//  to print "of ... bytes"
 	char blocksof[32];	//  to print "blocks of ... bytes"
 	sprintf(bytesof, " of %lld bytes", target.Size);
-	sprintf(blocksof, " blocks of %lu bytes\n", blocksize);
+	sprintf(blocksof, " block(s) of %lu bytes\n", blocksize);
 	LONGLONG blockswritten = 0;
 	DWORD newrw;
 	if ( blocksize >= MINBLOCKSIZE ) {	// full block size
@@ -588,9 +588,9 @@ int main(int argc, char **argv) {
 					blockstw = blockstw << 1;	// double blocks to test
 				}
 				if ( bestduration == MAXCLOCK) blocksize = MINBLOCKSIZE; 	// try minimal block size as backup
-				printf("Using block size of %lu bytes\n", blocksize);
-				fflush(stdout);
 			} else blocksize = MAXBLOCKSIZE;
+			printf("Using block size of %lu bytes\n", blocksize);
+			fflush(stdout);
 			/* First pass */
 			target = write_to_end(target, byteblock, blocksize);
 			/* Second passs */
@@ -606,6 +606,7 @@ int main(int argc, char **argv) {
 		} else {
 			/* Selective write */
 			printf("Overwriting blocks on %s that have other bytes than 0x%02X\n", target.Path, zeroff);
+			printf("Using block size of %lu bytes\n", blocksize);
 			fflush(stdout);
 			target = selective_write_blocks(target, byteblock, blocksize);
 			target = selective_write_blocks(target, byteblock, MINBLOCKSIZE);
