@@ -5,7 +5,7 @@
 /* License: GPL-3 */
 
 /* Version */
-const char *VERSION = "1.0.1_20230303";
+const char *VERSION = "1.0.2_20230306";
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -218,7 +218,7 @@ Z_TARGET verify_blocks(Z_TARGET target, DWORD blocksize, BYTE zeroff) {
 }
 
 /* Verify bytes by given block size, wipe block if it is not already */
-Z_TARGET selective_write_blocks(Z_TARGET target, BYTE *wbblock, DWORD blocksize) {
+Z_TARGET selective_write_blocks(Z_TARGET target, BYTE *byteblock, DWORD blocksize) {
 	LONGLONG bytesleft = target.Size - target.Pointer;
 	if ( blocksize == 0 || bytesleft == 0 ) return target;
 	if ( bytesleft < blocksize ) blocksize = bytesleft;
@@ -232,7 +232,7 @@ Z_TARGET selective_write_blocks(Z_TARGET target, BYTE *wbblock, DWORD blocksize)
 		ULONGLONG *ullblock = malloc(blocksize);
 		DWORD ullperblock = blocksize >> 3;	// ull in one block = blocksize / 8
 		ULONGLONG check;
-		memset(&check, wbblock[0], sizeof(ULONGLONG));
+		memset(&check, byteblock[0], sizeof(ULONGLONG));
 		LONGLONG tominusblock = target.Size - blocksize;
 		clock_t printclock = clock() + ONESEC;
 		while ( target.Pointer <= tominusblock ) {
@@ -248,7 +248,7 @@ Z_TARGET selective_write_blocks(Z_TARGET target, BYTE *wbblock, DWORD blocksize)
 					set_pointer(target);	// write block
 					if ( !WriteFile(
 						target.Handle,
-						wbblock,
+						byteblock,
 						blocksize,
 						&newrw,
 						NULL
@@ -273,24 +273,23 @@ Z_TARGET selective_write_blocks(Z_TARGET target, BYTE *wbblock, DWORD blocksize)
 				printclock = clock() + ONESEC;
 			}
 		}
-
 	} else {	// check the bytes left
 		blocksize = target.Size - target.Pointer;
-		BYTE *rbblock = malloc(blocksize);
+		BYTE *readblock = malloc(blocksize);
 		DWORD newread;
 		if ( !ReadFile(
 			target.Handle,
-			rbblock,
+			readblock,
 			blocksize,
 			&newrw,
 			NULL
 		) || newrw != blocksize ) error_read_block(target, blocksize);
 		for (DWORD p=0; p<blocksize; p++)	// check block
-			if ( rbblock[p] != wbblock[0] ) {
+			if ( readblock[p] != byteblock[0] ) {
 				set_pointer(target);	// write block
 				if ( !WriteFile(
 					target.Handle,
-					wbblock,
+					byteblock,
 					blocksize,
 					&newrw,
 					NULL
@@ -299,13 +298,13 @@ Z_TARGET selective_write_blocks(Z_TARGET target, BYTE *wbblock, DWORD blocksize)
 				blockswritten += 1;
 				if ( !ReadFile(
 					target.Handle,
-					rbblock,
+					readblock,
 					blocksize,
 					&newrw,
 					NULL
 				) || newrw != blocksize ) error_read_block(target, blocksize);
 				for (DWORD p=0; p<blocksize; p++)	// still not wiped?
-					if ( rbblock[p] != wbblock[0] ) error_notzero(target, p);
+					if ( readblock[p] != byteblock[0] ) error_notzero(target, p);
 				break;
 			}
 		target.Pointer += newrw;
@@ -393,10 +392,10 @@ int main(int argc, char **argv) {
 				if ( zeroff != 0 ) error_toomany();
 				zeroff = 0xff;
 			} else if ( argv[i][1] == 's' || argv[i][1] == 'S' ) {	// s for selective write
-				if ( selective_write || pure_check || xtrasave || full_verify) error_toomany();
+				if ( selective_write || pure_check || xtrasave ) error_toomany();
 				selective_write = TRUE;
 			} else if ( argv[i][1] == 'v' || argv[i][1] == 'V' ) {	// v for full verify
-				if ( full_verify || selective_write ) error_toomany();
+				if ( full_verify ) error_toomany();
 				full_verify = TRUE;
 			} else if ( argv[i][1] == 'c' || argv[i][1] == 'C' ) {	// c for pure check
 				if ( pure_check || selective_write || xtrasave ) error_toomany();
@@ -612,18 +611,20 @@ int main(int argc, char **argv) {
 			target = selective_write_blocks(target, byteblock, MINBLOCKSIZE);
 			target = selective_write_blocks(target, byteblock, (DWORD)(target.Size-target.Pointer));
 			free(byteblock);
+			printf("Verified  %lld bytes\n", target.Pointer);
 		}
 	}
 	/* Verify */
-	if ( full_verify ) {	// full verify checks every byte
-		printf("Verifying %s - full verify\n", target.Path);
+	if ( full_verify && !selective_write ) {	// full verify checks every byte
+		printf("Verifying %s\n", target.Path);
 		target.Pointer = 0;
 		set_pointer(target);	// start verification at first byte
 		target = verify_blocks(target, blocksize, zeroff);
 		target = verify_blocks(target, MINBLOCKSIZE, zeroff);
 		target = verify_blocks(target, (DWORD)(target.Size-target.Pointer), zeroff);
-		printf("Verified all %lld bytes\n", target.Pointer);
-	} else printf("Verifying %s\n", target.Path);
+		printf("Verified %lld bytes\n", target.Pointer);
+	}
+	printf("Sample:\n");
 	fflush(stdout);
 	target.Pointer = 0;	// print first block
 	target = print_block(target, zeroff);

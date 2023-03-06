@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 __author__ = 'Markus Thilo'
-__version__ = '1.0.1-0001_2023-02-27'
+__version__ = '1.0.1-0001_2023-03-06'
 __license__ = 'GPL-3'
 __email__ = 'markus.thilo@gmail.com'
 __status__ = 'Release'
@@ -80,7 +80,7 @@ class WinUtils:
 			universal_newlines = True
 		)
 
-	def zerod_launch(self, targetpath, blocksize=None, extra=False, writeff=False, verify=False, check=False):
+	def zerod_launch(self, targetpath, blocksize=None, job='normal', writeff=False, verify=False):
 		'Use zerod.exe to wipe file or drive'
 		cmd = [self.zerod_path, targetpath]
 		if blocksize:
@@ -93,13 +93,14 @@ class WinUtils:
 					cmd.append(str(blocksize))
 		if writeff:
 			cmd.append('/f')
-		if check:
+		if verify':
+			cmd.append('/v')
+		if job == 'check':
 			cmd.append('/c')
-		else:
-			if extra:
-				cmd.append('/x')
-			if verify:
-				cmd.append('/v')
+		elif job == 'extra':
+			cmd.append('/x')
+		elif job == 'selective':
+			cmd.append('/s')
 		return self.cmd_launch(cmd)
 
 	def zerod_get_size(self, targetpath):
@@ -337,26 +338,6 @@ class Gui(Tk, WinUtils, Logging):
 		self.drives_frame.pack(fill='both', expand=True)
 		self.selected_target = StringVar()
 		self.fill_drives_frame()
-		### FILE(S) ###
-		frame = Frame(self.main_frame)
-		frame.pack(fill='both', expand=True)
-		Radiobutton(
-				frame,
-				text = self.conf['TEXT']['files'],
-				command = self.enable_start_button,
-				variable = self.selected_target,
-				value = 'files',
-				padding = (self.PAD*2, 0)
-		).pack(side='left')
-		self.mainframe_user_opts['deletefiles'] = BooleanVar(value=self.conf['DEFAULT']['deletefiles'])
-		Checkbutton(
-			frame,
-			text = self.conf['TEXT']['deletefiles'],
-			variable = self.mainframe_user_opts['deletefiles'],
-			onvalue = True,
-			offvalue = False,
-			padding = (self.PAD*2, 0)
-		).pack(side='right')
 		### DISK OPTIONS FRAME ###
 		frame = Frame(self.main_frame, padding=self.PAD)
 		frame.pack(fill='both', expand=True)
@@ -387,14 +368,34 @@ class Gui(Tk, WinUtils, Logging):
 			onvalue=True, offvalue=False, padding=(self.PAD, 0)).grid(row=2, column=3, sticky='w')
 		Button(frame, text=self.conf['TEXT']['editlog'],
 			command=self.edit_log_header).grid(row=2, column=4, sticky='w')
+		### FILE(S) ###
+		frame = Frame(self.main_frame)
+		frame.pack(fill='both', expand=True)
+		Radiobutton(
+				frame,
+				text = self.conf['TEXT']['files'],
+				command = self.enable_start_button,
+				variable = self.selected_target,
+				value = 'files',
+				padding = self.PAD*2
+		).pack(side='left')
+		self.mainframe_user_opts['deletefiles'] = BooleanVar(value=self.conf['DEFAULT']['deletefiles'])
+		Checkbutton(
+			frame,
+			text = self.conf['TEXT']['deletefiles'],
+			variable = self.mainframe_user_opts['deletefiles'],
+			onvalue = True,
+			offvalue = False,
+			padding = (self.PAD, 0)
+		).pack(side='right')
 		### OPTIONS FRAME ###
 		frame = Frame(self.main_frame, padding=self.PAD)
 		frame.pack(fill='both', expand=True)
-		self.mainframe_user_opts['extra'] = BooleanVar(value=self.conf['DEFAULT']['extra'])
+		self.mainframe_user_opts['full_verify'] = BooleanVar(value=self.conf['DEFAULT']['full_verify'])
 		Checkbutton(
 			frame,
-			text = self.conf['TEXT']['extra'],
-			variable = self.mainframe_user_opts['extra'],
+			text = self.conf['TEXT']['full_verify'],
+			variable = self.mainframe_user_opts['full_verify'],
 			onvalue = True,
 			offvalue = False,
 			padding = (self.PAD, 0)
@@ -406,35 +407,26 @@ class Gui(Tk, WinUtils, Logging):
 			variable = self.mainframe_user_opts['ff'],
 			onvalue = True,
 			offvalue = False,
-			padding = (self.PAD, 0)
-		).grid(row=0, column=1, sticky='w')
-		self.mainframe_user_opts['full_verify'] = BooleanVar(value=self.conf['DEFAULT']['full_verify'])
-		Checkbutton(
-			frame,
-			text = self.conf['TEXT']['full_verify'],
-			variable = self.mainframe_user_opts['full_verify'],
-			onvalue = True,
-			offvalue = False,
-			padding = (self.PAD, 0)
-		).grid(row=0, column=3, sticky='w')
-		Label(frame, text=self.conf['TEXT']['blocksize']+':', padding = (self.PAD, 0)
-			).grid(row=0, column=4, sticky='w')
+			padding = self.PAD
+		).grid(row=1, column=0, sticky='w')
+		Label(frame, text=self.conf['TEXT']['blocksize']+':', padding=(self.PAD, 0)
+			).grid(row=3, column=0, sticky='w')
 		self.mainframe_user_opts['blocksize'] = StringVar(value=self.conf['DEFAULT']['blocksize'])
 		OptionMenu(
 			frame,
 			self.mainframe_user_opts['blocksize'],
 			self.conf['DEFAULT']['blocksize'],
 			*self.BLOCKSIZES
-		).grid(row=0, column=5, sticky='w')
-		self.mainframe_user_opts['check'] = BooleanVar(value=self.conf['DEFAULT']['check'])
-		Checkbutton(
-			frame,
-			text = self.conf['TEXT']['check'],
-			variable = self.mainframe_user_opts['check'],
-			onvalue = True,
-			offvalue = False,
-			padding = (self.PAD, 0)
-		).grid(row=1, column=0, sticky='w')
+		).grid(row=3, column=1, sticky='w')
+		self.mainframe_user_opts['job'] = StringVar(value=self.conf['DEFAULT']['job'])
+		Radiobutton(frame, variable=self.mainframe_user_opts['job'], value='normal',
+		text=self.conf['TEXT']['normal'], padding=(self.PAD*4, 0)).grid(row=0, column=2, sticky='w')
+		Radiobutton(frame, variable=self.mainframe_user_opts['job'], value='extra',
+		text=self.conf['TEXT']['extra'], padding=(self.PAD*4, 0)).grid(row=1, column=2, sticky='w')
+		Radiobutton(frame, variable=self.mainframe_user_opts['job'], value='selective',
+		text=self.conf['TEXT']['selective'], padding=(self.PAD*4, 0)).grid(row=2, column=2, sticky='w')
+		Radiobutton(frame, variable=self.mainframe_user_opts['job'], value='check',
+		text=self.conf['TEXT']['check'], padding=(self.PAD*4, 0)).grid(row=3, column=2, sticky='w')
 		### ASK MORE ###
 		frame = Frame(self.main_frame, padding=self.PAD)
 		frame.pack(fill='both', expand=True)
