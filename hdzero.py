@@ -2,12 +2,13 @@
 # -*- coding: utf-8 -*-
 
 __author__ = 'Markus Thilo'
-__version__ = '1.0.1-0001_2023-03-06'
+__version__ = '1.0.1-0001_2023-03-10'
 __license__ = 'GPL-3'
 __email__ = 'markus.thilo@gmail.com'
 __status__ = 'Release'
 __description__ = 'Wipe HDDs'
 
+from sys import argv
 from pathlib import Path
 from configparser import ConfigParser
 from wmi import WMI
@@ -93,7 +94,7 @@ class WinUtils:
 					cmd.append(str(blocksize))
 		if writeff:
 			cmd.append('/f')
-		if verify':
+		if verify:
 			cmd.append('/v')
 		if job == 'check':
 			cmd.append('/c')
@@ -251,8 +252,11 @@ class Gui(Tk, WinUtils, Logging):
 		{ 'PB': 10**15, 'TB': 10**12, 'GB': 10**9, 'MB': 10**6, 'kB': 10**3 }
 	)
 
-	def __init__(self):
+	def __init__(self, debug=False):
 		'Base Configuration'
+		self.debug = debug
+		if self.debug:
+			print('DEBUG mode')
 		self.__file_parentpath__ = Path(__file__).parent
 		self.conf = Config(self.__file_parentpath__/'hdzero.conf')
 		self.conf.read()
@@ -579,9 +583,8 @@ class Gui(Tk, WinUtils, Logging):
 		for msg_raw in self.zerod_proc.stdout:
 			msg_split = msg_raw.split()
 			msg = msg_raw.strip()
-			####################################################################################
-			print("DEBUG zerod:", msg)
-			####################################################################################
+			if self.debug:
+				print("DEBUG zerod:", msg)
 			info = None
 			if msg_split[0] == '...':
 				progress_str = files_of_str + pass_of_str + ' '
@@ -625,7 +628,7 @@ class Gui(Tk, WinUtils, Logging):
 		'Wipe selected disk - launch thread'
 		drive = self.get_drive(diskindex)
 		driveletters = [ part.Dependent.DeviceID for part in self.get_partitions(diskindex) ]
-		if not self.options['check']:
+		if self.options['job'] != 'check':
 			question = self.conf['TEXT']['drivewarning']
 			question += f'\n\n{drive.DeviceID}\n{drive.Caption}, {drive.MediaType}\n'
 			question += self.readable(drive.Size) + '\n'
@@ -664,7 +667,7 @@ class Gui(Tk, WinUtils, Logging):
 	def drive_worker(self):
 		'Worker for drive'
 		self.head_info.set(self.work_target)
-		if not self.options['check']:
+		if self.options['job'] != 'check':
 			self.main_info.set(self.conf['TEXT']['cleaning_table'])
 			self.clean_table(self.work_target)
 		if self.quit_work:
@@ -676,10 +679,9 @@ class Gui(Tk, WinUtils, Logging):
 		self.zerod_proc = self.zerod_launch(
 			self.work_target,
 			blocksize = self.options['blocksize'],
-			extra = self.options['extra'],
+			job = self.options['job'],
 			writeff = self.options['ff'],
-			verify = self.options['full_verify'],
-			check = self.options['check']
+			verify = self.options['full_verify']
 		)
 		self.watch_zerod()
 		if self.quit_work:
@@ -818,4 +820,5 @@ class Gui(Tk, WinUtils, Logging):
 		self.close_work_frame()
 
 if __name__ == '__main__':  # start here
-	Gui().mainloop()
+	gui = Gui(debug=(len(argv) > 1 and argv[1].lower() in '-d', '-debug', '--debug', '/d'))
+	gui.mainloop()

@@ -5,7 +5,7 @@
 /* License: GPL-3 */
 
 /* Version */
-const char *VERSION = "1.0.2_20230306";
+const char *VERSION = "1.0.1_20230310";
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -45,12 +45,12 @@ void print_help() {
 	printf("BLOCK_SIZE (optional):\n");
 	printf("    Size of blocks to write\n\n");
 	printf("OPTIONS (optional):\n");
-	printf("    /x - 2 pass wipe, write blocks with random values as 1st pass\n");
+	printf("    /x - Two pass wipe, write blocks with random values as 1st pass\n");
 	printf("    /f - Fill with binary ones / 0xFF instad of zeros\n");
-	printf("    /s - Overwrite only blocks that are not wiped (zeros or 0xFF)\n");
+	printf("    /s - Overwrite only blocks that are not wiped (zeros or 0xFF with /f)\n");
 	printf("    /v - Verify every byte after wipe\n");
-	printf("    /c - Only check, do not wipe\n");
-	printf("    /p - Only print size\n\n");
+	printf("    /c - Check, do not wipe (zeros or 0xFF with /f)\n");
+	printf("    /p - Print size, do not wipe\n\n");
 	printf("Example:\n");
 	printf("zerod.exe \\\\.\\PHYSICALDRIVE1 /x /v\n\n");
 	printf("Disclaimer:\n");
