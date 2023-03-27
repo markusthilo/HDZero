@@ -5,7 +5,7 @@
 /* License: GPL-3 */
 
 /* Version */
-const char *VERSION = "1.0.1_20230310";
+const char *VERSION = "1.1.0_20230327";
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -592,7 +592,7 @@ int main(int argc, char **argv) {
 			fflush(stdout);
 			/* First pass */
 			target = write_to_end(target, byteblock, blocksize);
-			/* Second passs */
+			/* Second pass */
 			if ( xtrasave ) {
 				printf("Pass 2 of 2, writing 0x%02X\n", zeroff);
 				fflush(stdout);

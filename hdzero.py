@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 __author__ = 'Markus Thilo'
-__version__ = '1.0.1-0001_2023-03-10'
+__version__ = '1.0.1-0001_2023-03-27'
 __license__ = 'GPL-3'
 __email__ = 'markus.thilo@gmail.com'
 __status__ = 'Release'
@@ -15,7 +15,7 @@ from wmi import WMI
 from win32api import GetCurrentProcessId, GetLogicalDriveStrings
 from win32com.shell.shell import IsUserAnAdmin
 from functools import partial
-from subprocess import Popen, PIPE, STDOUT, STARTUPINFO, STARTF_USESHOWWINDOW
+from subprocess import Popen, PIPE, STDOUT, STARTUPINFO, STARTF_USESHOWWINDOW, TimeoutExpired
 from time import sleep
 from datetime import datetime
 from threading import Thread
@@ -44,8 +44,8 @@ class Config(ConfigParser):
 class WinUtils:
 	'Needed Windows functions'
 
-	WINCMD_TIMEOUT = 20
-	WINCMD_RETRIES = 20
+	WINCMD_TIMEOUT = 30
+	WINCMD_RETRIES = 10
 	WINCMD_DELAY = 1
 	BLOCKSIZES = (
 		'auto',
@@ -157,7 +157,10 @@ class WinUtils:
 		'Run diskpart script'
 		self.tmpscriptpath.write_text(script)
 		proc = self.cmd_launch(['diskpart', '/s', self.tmpscriptpath])
-		proc.wait()
+		try:
+			proc.wait(timeout=self.WINCMD_TIMEOUT)
+		except TimeoutExpired:
+			pass
 		try:
 			self.tmpscriptpath.unlink()
 		except:
@@ -594,8 +597,7 @@ class Gui(Tk, WinUtils, Logging):
 			elif msg_split[0] == 'Calculating':
 				continue
 			elif msg_split[0] == 'Pass':
-				if self.options['extra']:
-					pass_of_str = self.conf['TEXT']['pass'] + f' {msg_split[1]} {of_str} {msg_split[3]}'
+				pass_of_str = self.conf['TEXT']['pass'] + f' {msg_split[1]} {of_str} {msg_split[3]}'
 			elif msg_split[0] == 'Testing':
 				self.main_info.set(self.conf['TEXT']['testing_blocksize'] + f' {msg_split[3]} {bytes_str}')
 			elif msg_split[0] == 'Using':
