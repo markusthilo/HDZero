@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 __author__ = 'Markus Thilo'
-__version__ = '1.0.1-0001_2023-03-27'
+__version__ = '1.0.1-0001_2023-03-31'
 __license__ = 'GPL-3'
 __email__ = 'markus.thilo@gmail.com'
 __status__ = 'Release'
@@ -20,7 +20,8 @@ from time import sleep
 from datetime import datetime
 from threading import Thread
 from tkinter import Tk, Toplevel, StringVar, BooleanVar, PhotoImage, CENTER, NORMAL, DISABLED
-from tkinter.ttk import Frame, Label, Button, Entry, Radiobutton, Checkbutton, Progressbar, OptionMenu
+from tkinter.ttk import Frame, Notebook, Label, Button, Entry, Radiobutton, Checkbutton
+from tkinter.ttk import LabelFrame, Progressbar, OptionMenu
 from tkinter.messagebox import askquestion, showwarning, showerror, showinfo
 from tkinter.filedialog import askopenfilenames, asksaveasfilename
 
@@ -173,7 +174,7 @@ class WinUtils:
 			driveno = driveid[17:]
 		except:
 			return
-		return self.run_diskpart(f'''select disk {driveno}
+		self.run_diskpart(f'''select disk {driveno}
 clean
 '''
 		)
@@ -340,52 +341,63 @@ class Gui(Tk, WinUtils, Logging):
 				background = self.WARNING_BG,
 				padding=self.PAD
 			).pack(fill='both', expand=True, side='left')
+		### TARGET NOTBOOK ###
+		notebook = Notebook(self.main_frame)
+		notebook.pack(padx=self.PAD, pady=self.PAD, expand=True)
 		### DRIVES ###
-		self.drives_frame = Frame(self.main_frame, padding=self.PAD)
+		drives_nbf = Frame(notebook)
+		drives_nbf.pack(fill='both', expand=True)
+		notebook.add(drives_nbf, text=self.conf['TEXT']['drive'])
+		self.drives_frame = Frame(drives_nbf, padding=self.PAD)
 		self.drives_frame.pack(fill='both', expand=True)
 		self.selected_target = StringVar()
 		self.fill_drives_frame()
 		### DISK OPTIONS FRAME ###
-		frame = Frame(self.main_frame, padding=self.PAD)
-		frame.pack(fill='both', expand=True)
-		Button(frame, text=self.conf['TEXT']['refresh'],
-			command=self.refresh_drives_frame).grid(row=0, column=0, sticky='w')
+		frame = LabelFrame(drives_nbf, padding=self.PAD)
+		frame.pack(padx=self.PAD, fill='both', expand=True)
 		self.mainframe_user_opts['parttable'] = StringVar(value=self.conf['DEFAULT']['parttable'])
 		Radiobutton(frame, variable=self.mainframe_user_opts['parttable'], value='None',
-			text=self.conf['TEXT']['no_diskpart'], padding=(self.PAD*4, 0)).grid(row=0, column=1, sticky='w')
+			text=self.conf['TEXT']['no_diskpart'], padding=(self.PAD, 0)).grid(row=0, column=0, sticky='w')
 		Radiobutton(frame, variable=self.mainframe_user_opts['parttable'],
 			value='gpt',
-			text='GPT', padding=(self.PAD*4, 0)).grid(row=1, column=1, sticky='w')
+			text='GPT', padding=(self.PAD, 0)).grid(row=1, column=0, sticky='w')
 		Radiobutton(frame, variable=self.mainframe_user_opts['parttable'],
 			value='mbr',
-			text='MBR', padding=(self.PAD*4, 0)).grid(row=2, column=1, sticky='w')
+			text='MBR', padding=(self.PAD, 0)).grid(row=2, column=0, sticky='w')
 		self.mainframe_user_opts['fs'] = StringVar(value=self.conf['DEFAULT']['fs'])
 		Radiobutton(frame, variable=self.mainframe_user_opts['fs'],
-			value='ntfs', text='NTFS', padding=(self.PAD*2, 0)).grid(row=0, column=2, sticky='w')
+			value='ntfs', text='NTFS', padding=(self.PAD*4, 0)).grid(row=0, column=1, sticky='w')
 		Radiobutton(frame, variable=self.mainframe_user_opts['fs'],
-			value='exfat', text='exFAT', padding=(self.PAD*2, 0)).grid(row=1, column=2, sticky='w')
+			value='exfat', text='exFAT', padding=(self.PAD*4, 0)).grid(row=1, column=1, sticky='w')
 		Radiobutton(frame, variable=self.mainframe_user_opts['fs'],
-			value='fat32', text='FAT32', padding=(self.PAD*2, 0)).grid(row=2, column=2, sticky='w')
+			value='fat32', text='FAT32', padding=(self.PAD*4, 0)).grid(row=2, column=1, sticky='w')
 		Label(frame, text=self.conf['TEXT']['volname']+':', padding=(self.PAD, 0)
-			).grid(row=0, column=3, sticky='e')
+			).grid(row=0, column=2, sticky='e')
 		self.mainframe_user_opts['volname'] = StringVar(value=self.conf['DEFAULT']['volname'])
-		Entry(frame, textvariable=self.mainframe_user_opts['volname']).grid(row=0, column=4, sticky='w')
+		Entry(frame, textvariable=self.mainframe_user_opts['volname']).grid(row=0, column=3, sticky='w')
 		self.mainframe_user_opts['writelog'] = BooleanVar(value=self.conf['DEFAULT']['writelog'])
 		Checkbutton(frame, text=self.conf['TEXT']['writelog'], variable=self.mainframe_user_opts['writelog'],
-			onvalue=True, offvalue=False, padding=(self.PAD, 0)).grid(row=2, column=3, sticky='w')
+			onvalue=True, offvalue=False, padding=(self.PAD, 0)).grid(row=2, column=2, sticky='w')
 		Button(frame, text=self.conf['TEXT']['editlog'],
-			command=self.edit_log_header).grid(row=2, column=4, sticky='w')
-		### FILE(S) ###
-		frame = Frame(self.main_frame)
+			command=self.edit_log_header).grid(row=2, column=3, sticky='w')
+		### START / REFRESH DRIVE FRAME ###
+		frame = Frame(drives_nbf, padding=self.PAD)
 		frame.pack(fill='both', expand=True)
-		Radiobutton(
-				frame,
-				text = self.conf['TEXT']['files'],
-				command = self.enable_start_button,
-				variable = self.selected_target,
-				value = 'files',
-				padding = self.PAD*2
-		).pack(side='left')
+		self.start_button = Button(
+			frame,
+			text = self.conf['TEXT']['start'],
+			command = self.start_drive,
+			state = DISABLED
+		)
+		self.start_button.pack(side='left')
+		Button(frame, text=self.conf['TEXT']['refresh'],
+			command=self.refresh_drives_frame).pack(padx=self.PAD*4, side='left')
+		### FILE(S) ###
+		files_nbf = Frame(notebook)
+		files_nbf.pack(fill='both', expand=True)
+		notebook.add(files_nbf, text=self.conf['TEXT']['files'])
+		frame = Frame(files_nbf)
+		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
 		self.mainframe_user_opts['deletefiles'] = BooleanVar(value=self.conf['DEFAULT']['deletefiles'])
 		Checkbutton(
 			frame,
@@ -394,10 +406,22 @@ class Gui(Tk, WinUtils, Logging):
 			onvalue = True,
 			offvalue = False,
 			padding = (self.PAD, 0)
-		).pack(side='right')
+		).pack(side='left')
+		frame = Frame(files_nbf)
+		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
+		Button(frame, text = self.conf['TEXT']['start'], command = self.start_files).pack(side='left')
 		### OPTIONS FRAME ###
-		frame = Frame(self.main_frame, padding=self.PAD)
+		frame = Frame(self.main_frame, padding=self.PAD*2)
 		frame.pack(fill='both', expand=True)
+		self.mainframe_user_opts['job'] = StringVar(value=self.conf['DEFAULT']['job'])
+		Radiobutton(frame, variable=self.mainframe_user_opts['job'], value='normal',
+		text=self.conf['TEXT']['normal'], padding=(self.PAD, 0)).grid(row=0, column=0, sticky='w')
+		Radiobutton(frame, variable=self.mainframe_user_opts['job'], value='extra',
+		text=self.conf['TEXT']['extra'], padding=(self.PAD, 0)).grid(row=1, column=0, sticky='w')
+		Radiobutton(frame, variable=self.mainframe_user_opts['job'], value='selective',
+		text=self.conf['TEXT']['selective'], padding=(self.PAD, 0)).grid(row=2, column=0, sticky='w')
+		Radiobutton(frame, variable=self.mainframe_user_opts['job'], value='check',
+		text=self.conf['TEXT']['check'], padding=(self.PAD, 0)).grid(row=3, column=0, sticky='w')
 		self.mainframe_user_opts['full_verify'] = BooleanVar(value=self.conf['DEFAULT']['full_verify'])
 		Checkbutton(
 			frame,
@@ -405,8 +429,8 @@ class Gui(Tk, WinUtils, Logging):
 			variable = self.mainframe_user_opts['full_verify'],
 			onvalue = True,
 			offvalue = False,
-			padding = (self.PAD, 0)
-		).grid(row=0, column=0, sticky='w')
+			padding = (self.PAD*4, 0)
+		).grid(row=0, column=1, sticky='w')
 		self.mainframe_user_opts['ff'] = BooleanVar(value=self.conf['DEFAULT']['ff'])
 		Checkbutton(
 			frame,
@@ -414,27 +438,18 @@ class Gui(Tk, WinUtils, Logging):
 			variable = self.mainframe_user_opts['ff'],
 			onvalue = True,
 			offvalue = False,
-			padding = self.PAD
-		).grid(row=1, column=0, sticky='w')
-		Label(frame, text=self.conf['TEXT']['blocksize']+':', padding=(self.PAD, 0)
-			).grid(row=3, column=0, sticky='w')
+			padding = (self.PAD*4, 0)
+		).grid(row=1, column=1, sticky='w')
+		Label(frame, text=self.conf['TEXT']['blocksize']+':'#)#, padding=(self.PAD*4, 0)
+			).grid(row=3, column=2, sticky='e')
 		self.mainframe_user_opts['blocksize'] = StringVar(value=self.conf['DEFAULT']['blocksize'])
 		OptionMenu(
 			frame,
 			self.mainframe_user_opts['blocksize'],
 			self.conf['DEFAULT']['blocksize'],
 			*self.BLOCKSIZES
-		).grid(row=3, column=1, sticky='w')
-		self.mainframe_user_opts['job'] = StringVar(value=self.conf['DEFAULT']['job'])
-		Radiobutton(frame, variable=self.mainframe_user_opts['job'], value='normal',
-		text=self.conf['TEXT']['normal'], padding=(self.PAD*4, 0)).grid(row=0, column=2, sticky='w')
-		Radiobutton(frame, variable=self.mainframe_user_opts['job'], value='extra',
-		text=self.conf['TEXT']['extra'], padding=(self.PAD*4, 0)).grid(row=1, column=2, sticky='w')
-		Radiobutton(frame, variable=self.mainframe_user_opts['job'], value='selective',
-		text=self.conf['TEXT']['selective'], padding=(self.PAD*4, 0)).grid(row=2, column=2, sticky='w')
-		Radiobutton(frame, variable=self.mainframe_user_opts['job'], value='check',
-		text=self.conf['TEXT']['check'], padding=(self.PAD*4, 0)).grid(row=3, column=2, sticky='w')
-		### ASK MORE ###
+		).grid(row=3, column=3, sticky='w')
+		### BOTTOM ###
 		frame = Frame(self.main_frame, padding=self.PAD)
 		frame.pack(fill='both', expand=True)
 		self.mainframe_user_opts['askmore'] = BooleanVar(value=self.conf['DEFAULT']['askmore'])
@@ -443,22 +458,12 @@ class Gui(Tk, WinUtils, Logging):
 			text = self.conf['TEXT']['askmore'],
 			variable = self.mainframe_user_opts['askmore'],
 			onvalue = True, offvalue = False
-		).pack(side='right')
-		### BOTTOM ###
-		frame = Frame(self.main_frame, padding=self.PAD)
-		frame.pack(fill='both', expand=True)
-		self.start_button = Button(
-			frame,
-			text = self.conf['TEXT']['start'],
-			command = self.start_work,
-			state = DISABLED
-		)
-		self.start_button.pack(side='left')
+		).pack(padx=self.PAD, side='left')
 		Button(frame, text=self.conf['TEXT']['quit'], command=self.quit_app).pack(side='right')
 
 	def fill_drives_frame(self):
 		'Drive section'
-		Label(self.drives_frame, text=self.conf['TEXT']['drive']).grid(row=0, column=0, sticky='w')
+		#Label(self.drives_frame, text=self.conf['TEXT']['drive']).grid(row=0, column=0, sticky='w')
 		Label(self.drives_frame, text=self.conf['TEXT']['mounted']).grid(row=0, column=1, sticky='w')
 		Label(self.drives_frame, text=self.conf['TEXT']['details']).grid(row=0, column=2, sticky='w')
 		row = 1
@@ -469,7 +474,7 @@ class Gui(Tk, WinUtils, Logging):
 				command = self.enable_start_button,
 				variable = self.selected_target,
 				value = drive.index,
-				padding=(self.PAD, 0)
+				padding=(self.PAD*2, 0)
 			)
 			button.grid(row=row, column=0, sticky='w')
 			partitions = [ part.Dependent.DeviceID for part in self.get_partitions(drive.index) ]
@@ -626,8 +631,12 @@ class Gui(Tk, WinUtils, Logging):
 			if self.quit_work:
 				return
 
-	def drive_init(self, diskindex):
-		'Wipe selected disk - launch thread'
+	def start_drive(self):
+		'Star work process'
+		target = self.selected_target.get()
+		if not target:
+			return
+		diskindex = int(target)
 		drive = self.get_drive(diskindex)
 		driveletters = [ part.Dependent.DeviceID for part in self.get_partitions(diskindex) ]
 		if self.options['job'] != 'check':
@@ -738,7 +747,7 @@ class Gui(Tk, WinUtils, Logging):
 		showinfo(message=self.conf['TEXT']['all_done'])
 		self.close_work_frame()
 
-	def files_init(self):
+	def start_files(self):
 		'Wipe selected file or files - launch thread'
 		if self.options['check']:
 			self.work_target = askopenfilenames(
