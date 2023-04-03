@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 __author__ = 'Markus Thilo'
-__version__ = '1.0.1-0001_2023-03-31'
+__version__ = '1.0.1_2023-04-03'
 __license__ = 'GPL-3'
 __email__ = 'markus.thilo@gmail.com'
 __status__ = 'Release'
@@ -411,7 +411,9 @@ class Gui(Tk, WinUtils, Logging):
 		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
 		Button(frame, text = self.conf['TEXT']['start'], command = self.start_files).pack(side='left')
 		### OPTIONS FRAME ###
-		frame = Frame(self.main_frame, padding=self.PAD*2)
+		frame = Frame(self.main_frame, padding=self.PAD)
+		frame.pack(fill='both', expand=True)
+		frame = LabelFrame(frame, padding=(self.PAD*2, 0))
 		frame.pack(fill='both', expand=True)
 		self.mainframe_user_opts['job'] = StringVar(value=self.conf['DEFAULT']['job'])
 		Radiobutton(frame, variable=self.mainframe_user_opts['job'], value='normal',
@@ -463,7 +465,6 @@ class Gui(Tk, WinUtils, Logging):
 
 	def fill_drives_frame(self):
 		'Drive section'
-		#Label(self.drives_frame, text=self.conf['TEXT']['drive']).grid(row=0, column=0, sticky='w')
 		Label(self.drives_frame, text=self.conf['TEXT']['mounted']).grid(row=0, column=1, sticky='w')
 		Label(self.drives_frame, text=self.conf['TEXT']['details']).grid(row=0, column=2, sticky='w')
 		row = 1
@@ -515,16 +516,6 @@ class Gui(Tk, WinUtils, Logging):
 		self.notepad_log_header()
 		self.deiconify()
 		self.refresh_drives_frame()
-
-	def start_work(self):
-		'Star work process'
-		target = self.selected_target.get()
-		if target:
-			self.decode_settings()
-			if target == 'files':
-				self.files_init()
-			else:
-				self.drive_init(int(target))
 
 	def quit_app(self):
 		'Write config an quit'
@@ -621,9 +612,6 @@ class Gui(Tk, WinUtils, Logging):
 			elif msg_split[0] == 'Warning:':
 				info = msg
 				self.main_info.set(info)
-			elif msg_split[0] == 'Retrying':
-				info = msg
-				self.progress_info.set(info)
 			else:
 				info = msg
 			if info and self.options['writelog']:
@@ -636,9 +624,12 @@ class Gui(Tk, WinUtils, Logging):
 		target = self.selected_target.get()
 		if not target:
 			return
+		self.decode_settings()
 		diskindex = int(target)
 		drive = self.get_drive(diskindex)
 		driveletters = [ part.Dependent.DeviceID for part in self.get_partitions(diskindex) ]
+		if self.debug:
+			print('DEBUG: gui.options:', self.options)
 		if self.options['job'] != 'check':
 			question = self.conf['TEXT']['drivewarning']
 			question += f'\n\n{drive.DeviceID}\n{drive.Caption}, {drive.MediaType}\n'
@@ -653,7 +644,7 @@ class Gui(Tk, WinUtils, Logging):
 			else:
 				question += self.conf['TEXT']['nomounted']
 			if not self.confirm(question):
-				self.mainframe()
+				self.refresh_drives_frame()
 				return
 			stillmounted = self.dismount_drives(driveletters)
 			if stillmounted:
@@ -661,7 +652,7 @@ class Gui(Tk, WinUtils, Logging):
 				warning += ', '.join(stillmounted)
 				warning += '\n\n' + self.conf['TEXT']['dismount_manually']
 				showwarning(title=self.conf['TEXT']['warning_title'], message=warning)
-				self.mainframe()
+				self.refresh_drives_frame()
 				return
 		if driveletters != list():
 			self.driveletter = driveletters[0]
