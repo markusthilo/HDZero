@@ -5,7 +5,7 @@
 /* License: GPL-3 */
 
 /* Version */
-const char *VERSION = "1.1.0_20230327";
+const char *VERSION = "1.1.0_20230405";
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -638,6 +638,8 @@ int main(int argc, char **argv) {
 		target = print_block(target, zeroff);
 	}
 	close_target(target);
-	printf("All done, %lld bytes are 0x%02X\n", target.Size, zeroff);
+	printf("All done, %lld bytes ", target.Size);
+	if ( full_verify || selective_write ) printf("are 0x%02X\n", zeroff);
+	else printf("were written\n");
 	exit(0);
 }

@@ -273,58 +273,12 @@ class Gui(Tk, WinUtils, Logging):
 		self.app_icon = PhotoImage(file=self.__file_parentpath__/'icon.png')
 		self.iconphoto(False, self.app_icon)
 		self.resizable(False, False)
+		self.protocol('WM_DELETE_WINDOW', self.quit_app)
 		self.mainframe_user_opts = dict()
-		self.gen_main_frame()
-
-	def readable(self, size):
-		'Genereate readable size string'
-		try:
-			size = int(size)
-		except (TypeError, ValueError):
-			return self.conf['TEXT']['undetected']
-		strings = list()
-		for base in self.SIZEBASE:
-			for u, b in base.items():
-				rnd = round(size/b, 2)
-				if rnd >= 1:
-					break
-			if rnd >= 10:
-				rnd = round(rnd,1)
-			if rnd >= 100:
-				rnd = round(rnd)
-			strings.append(f'{rnd} {u}')
-		return ' / '.join(strings)
-
-	def list_to_string(self, strings):
-		'One per line'
-		if len(strings) <= 20:
-			return ':\n' + '\n '.join(strings)
-		else:
-			return ':\n' + '\n '.join(strings[:20]) + f'\n... {len(strings)-20} ' + self.conf['TEXT']['more']
-
-	def clear_frame(self, frame):
-		'Destroy all widgets in frame'
-		for child in frame.winfo_children():
-			child.destroy()
-
-	def disable_frame(self, frame):
-		'Disable all widgets that have this option in frame'
-		for child in frame.winfo_children():
-			try:
-				child.configure(state=DISABLED)
-			except:
-				pass
-
-	def gen_main_frame(self):
-		'Define Main Frame'
-		try:
-			self.main_frame.destroy()
-		except AttributeError:
-			pass
-		self.main_frame = Frame(self)
-		self.main_frame.pack()
-		### HEAD ###
-		frame = Frame(self.main_frame)
+		self.working = False
+		self.abort_work = False
+		### MAIN FRAME ###
+		frame = Frame(self)
 		frame.pack(fill='both', expand=True)
 		Label(
 			frame,
@@ -332,7 +286,7 @@ class Gui(Tk, WinUtils, Logging):
 			padding = self.PAD
 		).pack(fill='both', expand=True, side='left')
 		if not self.i_am_admin:
-			frame = Frame(self.main_frame)
+			frame = Frame(self)
 			frame.pack(fill='both', expand=True)
 			Label(
 				frame,
@@ -342,7 +296,7 @@ class Gui(Tk, WinUtils, Logging):
 				padding=self.PAD
 			).pack(fill='both', expand=True, side='left')
 		### TARGET NOTBOOK ###
-		notebook = Notebook(self.main_frame)
+		notebook = Notebook(self)
 		notebook.pack(padx=self.PAD, pady=self.PAD, expand=True)
 		### DRIVES ###
 		drives_nbf = Frame(notebook)
@@ -379,17 +333,17 @@ class Gui(Tk, WinUtils, Logging):
 		Checkbutton(frame, text=self.conf['TEXT']['writelog'], variable=self.mainframe_user_opts['writelog'],
 			onvalue=True, offvalue=False, padding=(self.PAD, 0)).grid(row=2, column=2, sticky='w')
 		Button(frame, text=self.conf['TEXT']['editlog'],
-			command=self.edit_log_header).grid(row=2, column=3, sticky='w')
+			command=self.notepad_log_header).grid(row=2, column=3, sticky='w')
 		### START / REFRESH DRIVE FRAME ###
 		frame = Frame(drives_nbf, padding=self.PAD)
 		frame.pack(fill='both', expand=True)
-		self.start_button = Button(
+		self.start_drive_button = Button(
 			frame,
 			text = self.conf['TEXT']['start'],
 			command = self.start_drive,
 			state = DISABLED
 		)
-		self.start_button.pack(side='left')
+		self.start_drive_button.pack(side='left')
 		Button(frame, text=self.conf['TEXT']['refresh'],
 			command=self.refresh_drives_frame).pack(padx=self.PAD*4, side='left')
 		### FILE(S) ###
@@ -409,9 +363,14 @@ class Gui(Tk, WinUtils, Logging):
 		).pack(side='left')
 		frame = Frame(files_nbf)
 		frame.pack(padx=self.PAD, pady=self.PAD, fill='both', expand=True)
-		Button(frame, text = self.conf['TEXT']['start'], command = self.start_files).pack(side='left')
+		self.start_files_button = Button(
+			frame,
+			text = self.conf['TEXT']['start'],
+			command = self.start_files
+		)
+		self.start_files_button.pack(side='left')
 		### OPTIONS FRAME ###
-		frame = Frame(self.main_frame, padding=self.PAD)
+		frame = Frame(self, padding=self.PAD)
 		frame.pack(fill='both', expand=True)
 		frame = LabelFrame(frame, padding=(self.PAD*2, 0))
 		frame.pack(fill='both', expand=True)
@@ -452,7 +411,7 @@ class Gui(Tk, WinUtils, Logging):
 			*self.BLOCKSIZES
 		).grid(row=3, column=3, sticky='w')
 		### BOTTOM ###
-		frame = Frame(self.main_frame, padding=self.PAD)
+		frame = Frame(self, padding=self.PAD)
 		frame.pack(fill='both', expand=True)
 		self.mainframe_user_opts['askmore'] = BooleanVar(value=self.conf['DEFAULT']['askmore'])
 		Checkbutton(
@@ -461,7 +420,46 @@ class Gui(Tk, WinUtils, Logging):
 			variable = self.mainframe_user_opts['askmore'],
 			onvalue = True, offvalue = False
 		).pack(padx=self.PAD, side='left')
-		Button(frame, text=self.conf['TEXT']['quit'], command=self.quit_app).pack(side='right')
+		self.quit_button = Button(frame, text=self.conf['TEXT']['quit'], command=self.quit_app)
+		self.quit_button.pack(side='right')
+
+	def readable(self, size):
+		'Genereate readable size string'
+		try:
+			size = int(size)
+		except (TypeError, ValueError):
+			return self.conf['TEXT']['undetected']
+		strings = list()
+		for base in self.SIZEBASE:
+			for u, b in base.items():
+				rnd = round(size/b, 2)
+				if rnd >= 1:
+					break
+			if rnd >= 10:
+				rnd = round(rnd,1)
+			if rnd >= 100:
+				rnd = round(rnd)
+			strings.append(f'{rnd} {u}')
+		return ' / '.join(strings)
+
+	def list_to_string(self, strings):
+		'One per line'
+		if len(strings) <= 20:
+			return ':\n' + '\n '.join(strings)
+		else:
+			return ':\n' + '\n '.join(strings[:20]) + f'\n... {len(strings)-20} ' + self.conf['TEXT']['more']
+
+	def clear_frame(self, frame):
+		'Destroy all widgets in frame'
+		for child in frame.winfo_children():
+			child.destroy()
+
+	def decode_settings(self):
+		'Decode settings and write as default to config file'
+		self.options = { setting: tkvalue.get() for setting, tkvalue in self.mainframe_user_opts.items() } 
+		for option, value in self.options.items():
+			self.conf['DEFAULT'][option] = str(value)
+		self.conf.write()
 
 	def fill_drives_frame(self):
 		'Drive section'
@@ -472,7 +470,7 @@ class Gui(Tk, WinUtils, Logging):
 			button = Radiobutton(
 				self.drives_frame,
 				text = f'{drive.index}',
-				command = self.enable_start_button,
+				command = self.enable_start_drive_button,
 				variable = self.selected_target,
 				value = drive.index,
 				padding=(self.PAD*2, 0)
@@ -492,34 +490,24 @@ class Gui(Tk, WinUtils, Logging):
 				button.configure(state=DISABLED)
 			row += 1
 
-	def enable_start_button(self):
-		'When target has been selected'
-		self.start_button.configure(state=NORMAL)
-
-	def decode_settings(self):
-		'Decode settings and write as default to config file'
-		self.options = { setting: tkvalue.get() for setting, tkvalue in self.mainframe_user_opts.items() } 
-		for option, value in self.options.items():
-			self.conf['DEFAULT'][option] = str(value)
-		self.conf.write()
-
 	def refresh_drives_frame(self):
 		self.decode_settings()
 		self.clear_frame(self.drives_frame)
-		self.start_button.configure(state=DISABLED)
+		self.start_drive_button.configure(state=DISABLED)
 		self.selected_target.set(None)
 		self.fill_drives_frame()
 
-	def edit_log_header(self):
-		'Edit log header'
-		self.withdraw()
-		self.notepad_log_header()
-		self.deiconify()
-		self.refresh_drives_frame()
+	def enable_start_drive_button(self):
+		'When target has been selected'
+		if not self.working:
+			self.start_drive_button.configure(state=NORMAL)
 
 	def quit_app(self):
 		'Write config an quit'
-		self.decode_settings()
+		if self.debug:
+			print('DEBUG: gui.working:', self.working)
+		if self.working and not self.confirm(self.conf['TEXT']['abort'] + '?'):
+			return
 		self.destroy()
 
 	def confirm(self, question):
@@ -537,11 +525,15 @@ class Gui(Tk, WinUtils, Logging):
 
 	def open_work_frame(self):
 		'Open frame to show progress and iconify main frame'
-		self.withdraw()
+		self.working = True
+		self.quit_button.configure(state=DISABLED)
+		self.start_drive_button.configure(state=DISABLED)
+		self.start_files_button.configure(state=DISABLED)
 		self.work_frame = Toplevel(self)
 		self.work_frame.iconphoto(False, self.app_icon)
 		self.work_frame.title(self.conf['TEXT']['title'])
 		self.work_frame.resizable(False, False)
+		self.work_frame.protocol('WM_DELETE_WINDOW', self.set_abort_work)
 		frame = Frame(self.work_frame)
 		frame.pack(fill='both', expand=True)
 		self.head_info = StringVar()
@@ -553,37 +545,35 @@ class Gui(Tk, WinUtils, Logging):
 		self.progressbar.start()
 		self.progress_info = StringVar()
 		Label(frame, textvariable=self.progress_info).pack(padx=self.PAD, pady=self.PAD)
-		self.quit_button = Button(
+		Button(
 			frame,
-			text = self.conf['TEXT']['quit'],
-			command = self.set_quit_work
-		)
-		self.quit_button.pack(padx=self.PAD, pady=self.PAD, side='right')
-		self.quit_work = False
+			text = self.conf['TEXT']['abort'],
+			command = self.set_abort_work
+		).pack(padx=self.PAD, pady=self.PAD, side='right')
 
 	def close_work_frame(self):
 		'Close work frame and show main'
-		self.deiconify()
-		self.refresh_drives_frame()
+		self.working = False
+		self.abort_work = False
+		self.quit_button.configure(state=NORMAL)
+		self.start_files_button.configure(state=NORMAL)
 		self.work_frame.destroy()
 
-	def set_quit_work(self):
+	def set_abort_work(self):
 		'Write config an quit'
-		if self.confirm(self.conf['TEXT']['abort']):
-			self.quit_work = True
-			self.close_work_frame()
+		if self.confirm(self.conf['TEXT']['abort'] + '?'):
+			self.abort_work = True
 
 	def watch_zerod(self, files_of_str = ''):
 		'Handle output of zerod'
 		of_str = self.conf['TEXT']['of']
 		bytes_str = self.conf['TEXT']['bytes']
-		are_str = self.conf['TEXT']['are']
 		pass_of_str = ''
 		for msg_raw in self.zerod_proc.stdout:
 			msg_split = msg_raw.split()
 			msg = msg_raw.strip()
 			if self.debug:
-				print("DEBUG zerod:", msg)
+				print("DEBUG: zerod:", msg)
 			info = None
 			if msg_split[0] == '...':
 				progress_str = files_of_str + pass_of_str + ' '
@@ -607,7 +597,11 @@ class Gui(Tk, WinUtils, Logging):
 				info = self.conf['TEXT']['verified'] + f' {msg_split[1]} {bytes_str}'
 				self.main_info.set(info)
 			elif msg_split[0] == 'All':
-				info = f'{msg_split[2]} {bytes_str} {are_str} {msg_split[5]}'
+				info = f'{msg_split[2]} {bytes_str} '
+				if msg_split[4] == 'are':
+					info += self.conf['TEXT']['are'] + f' {msg_split[5]}'
+				else:
+					info += self.conf['TEXT']['written']
 				self.main_info.set(info)
 			elif msg_split[0] == 'Warning:':
 				info = msg
@@ -616,7 +610,7 @@ class Gui(Tk, WinUtils, Logging):
 				info = msg
 			if info and self.options['writelog']:
 				self.append_log(info)
-			if self.quit_work:
+			if self.abort_work:
 				return
 
 	def start_drive(self):
@@ -672,7 +666,7 @@ class Gui(Tk, WinUtils, Logging):
 		if self.options['job'] != 'check':
 			self.main_info.set(self.conf['TEXT']['cleaning_table'])
 			self.clean_table(self.work_target)
-		if self.quit_work:
+		if self.abort_work:
 			self.close_work_frame()
 			return
 		self.progressbar.stop()
@@ -686,7 +680,7 @@ class Gui(Tk, WinUtils, Logging):
 			verify = self.options['full_verify']
 		)
 		self.watch_zerod()
-		if self.quit_work:
+		if self.abort_work:
 			self.zerod_proc.terminate()
 			self.close_work_frame()
 			return
@@ -788,7 +782,7 @@ class Gui(Tk, WinUtils, Logging):
 				file_cnt += 1
 				files_of_str = self.conf['TEXT']['file'] + f' {file_cnt} {of_str} {qt_files}, '
 			self.watch_zerod(files_of_str=files_of_str)
-			if self.quit_work:
+			if self.abort_work:
 				self.zerod_proc.terminate()
 				self.close_work_frame()
 			return
