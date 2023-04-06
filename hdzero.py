@@ -621,6 +621,9 @@ class Gui(Tk, WinUtils, Logging):
 		self.decode_settings()
 		diskindex = int(target)
 		drive = self.get_drive(diskindex)
+		if drive == None:
+			self.refresh_drives_frame()
+			return
 		driveletters = [ part.Dependent.DeviceID for part in self.get_partitions(diskindex) ]
 		if self.debug:
 			print('DEBUG: gui.options:', self.options)
