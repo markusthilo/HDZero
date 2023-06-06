@@ -5,7 +5,7 @@
 /* License: GPL-3 */
 
 /* Version */
-const char *VERSION = "1.1.1_20230605";
+const char *VERSION = "1.2.0_20230606";
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -111,7 +111,7 @@ void set_pointer(Z_TARGET *target) {
 
 /* List bad blocks */
 void list_bad_blocks(FILE *stream, Z_TARGET *target) {
-	fprintf(stream, ": unable to wipe %lld block(s), offset(s) in bytes:\n", target->BadBlockCnt);
+	fprintf(stream, "unable to wipe %lld block(s), offset(s) in bytes:\n", target->BadBlockCnt);
 	for (int i; i<target->BadBlockCnt-1; i++) printf("%lld, ", target->BadBlocks[i]);
 	printf("%lld\n", target->BadBlocks[target->BadBlockCnt-1]);
 }
@@ -119,12 +119,21 @@ void list_bad_blocks(FILE *stream, Z_TARGET *target) {
 /* Read/write error */
 void error_rw(Z_TARGET *target) {
 	close_target(target);
-	fprintf(stderr, "Error");
+	fprintf(stderr, "Error: ");
 	list_bad_blocks(stderr, target);
 	fprintf(stderr,"Too many bad blocks, aborting\n");
 	exit(1);
 }
 
+/* Warning bad blocks */
+void warning_bad_blocks(Z_TARGET *target) {
+	close_target(target);
+	fprintf(stderr, "Warning: ");
+	list_bad_blocks(stderr, target);
+	exit(1);
+}
+
+/* Warning bad block on write */
 void warning_unable_to_write(Z_TARGET *target, DWORD new, DWORD blocksize) {
 	fprintf(stderr, "Warning: could not write block of %lu bytes at offset %lld\n",
 		blocksize, target->Pointer + new);
@@ -134,6 +143,7 @@ void warning_unable_to_write(Z_TARGET *target, DWORD new, DWORD blocksize) {
 	set_pointer(target);
 }
 
+/* Warning bad block on read*/
 void warning_unable_to_read(Z_TARGET *target, DWORD new, DWORD blocksize) {
 	fprintf(stderr, "Warning: could not read block of %lu bytes at offset %lld\n",
 		blocksize, target->Pointer + new);
@@ -143,6 +153,7 @@ void warning_unable_to_read(Z_TARGET *target, DWORD new, DWORD blocksize) {
 	set_pointer(target);
 }
 
+/* Warning block not wiped */
 void warning_not_wiped(Z_TARGET *target, DWORD new, DWORD blocksize) {
 	fprintf(stderr, "Warning: block of %lu bytes at offset %lld is not completely wiped\n",
 		blocksize, target->Pointer + new);
@@ -477,45 +488,71 @@ int main(int argc, char **argv) {
 	fflush(stdout);
 	clock_t start, duration;
 	if ( write_all ) {	// write every block
-		start = clock();	// 1st pass
-		write_all_blocks(&target, byteblock, blocksize);
-		write_all_blocks(&target, byteblock, MINBLOCKSIZE);
-		write_all_blocks(&target, byteblock, (DWORD)(target.Size-target.Pointer));
-		duration = clock() - start;
-		printf("1st pass took %f second(s) / %ld clock units\n", duration/CLOCKS_PER_SEC, duration);
-		if ( xtrasave ) {	// 2nd pass on /x
-			printf("Pass 2 of 2, writing 0x%02X\n", zeroff);
+		if ( xtrasave ) {
+			for (int i=0; i<blocksize; i++) byteblock[i] = (char)rand();
+			printf("Pass 1 of 2, writing random bytes\n");
 			fflush(stdout);
-			memset(byteblock, zeroff, blocksize);
 			target.Pointer = 0;
 			set_pointer(&target);
 			target.PercentPtr = 0;
-			start = clock();
+			target.BadBlockCnt = 0;
+			start = clock();	// 1st pass of 2
 			write_all_blocks(&target, byteblock, blocksize);
 			write_all_blocks(&target, byteblock, MINBLOCKSIZE);
-			write_all_blocks(&target, byteblock, 1);
+			write_all_blocks(&target, byteblock, 0);
 			duration = clock() - start;
-			printf("2nd pass took %f second(s) / %ld clock units\n", duration/CLOCKS_PER_SEC, duration);
+			printf("1st pass of 2 took %f second(s) / %ld clock units\n",
+				duration/CLOCKS_PER_SEC, duration);
+			if ( target.BadBlockCnt > 0 ) warning_bad_blocks(&target);
+			printf("Pass 2 of 2, w");
 		}
+			else printf("W");
+		printf("riting 0x%02X\n", zeroff);
+		fflush(stdout);
+		memset(byteblock, zeroff, blocksize);
+		target.Pointer = 0;
+		set_pointer(&target);
+		target.PercentPtr = 0;
+		target.BadBlockCnt = 0;
+		start = clock();
+		write_all_blocks(&target, byteblock, blocksize);
+		write_all_blocks(&target, byteblock, MINBLOCKSIZE);
+		write_all_blocks(&target, byteblock, 0);
+		duration = clock() - start;
+		if ( xtrasave ) printf("2nd pass");
+		else printf("Wiping");
+		printf("took %f second(s) / %ld clock units\n", duration/CLOCKS_PER_SEC, duration);
+		if ( target.BadBlockCnt > 0 ) warning_bad_blocks(&target);
 	} else {	// overwrite only blocks that are not zeroed
+		target.Pointer = 0;
+		set_pointer(&target);
+		target.PercentPtr = 0;
+		target.BadBlockCnt = 0;
 		start = clock();
 		selective_write_blocks(&target, byteblock, blocksize);
 		selective_write_blocks(&target, byteblock, MINBLOCKSIZE);
-		selective_write_blocks(&target, byteblock, 1);
+		selective_write_blocks(&target, byteblock, 0);
 		duration = clock() - start;
 		printf("Verifying and wiping took %f second(s) / %ld clock units\n",
 			duration/CLOCKS_PER_SEC, duration);
+		if ( target.BadBlockCnt > 0 ) warning_bad_blocks(&target);
 	}
 	free(byteblock);
-	/* Verify */
-	if ( FALSE ) {	// full verify checks every byte
+	if ( pure_check || write_all ) {	// full verify checks every byte
 		printf("Verifying %s\n", target.Path);
+		fflush(stdout);
 		target.Pointer = 0;
-		set_pointer(&target);	// start verification at first byte
+		set_pointer(&target);
+		target.PercentPtr = 0;
+		target.BadBlockCnt = 0;
+		start = clock();
 		verify_blocks(&target, blocksize, zeroff);
 		verify_blocks(&target, MINBLOCKSIZE, zeroff);
 		verify_blocks(&target, (DWORD)(target.Size-target.Pointer), zeroff);
-		printf("Verified %lld bytes\n", target.Pointer);
+		duration = clock() - start;
+		printf("Verifying took %f second(s) / %ld clock units\n",
+			duration/CLOCKS_PER_SEC, duration);
+		if ( target.BadBlockCnt > 0 ) warning_bad_blocks(&target);
 	}
 	printf("Sample:\n");
 	target.Pointer = 0;	// print first block
@@ -530,7 +567,6 @@ int main(int argc, char **argv) {
 		print_block(&target, zeroff);
 	}
 	close_target(&target);
-	printf("All done, %lld bytes ", target.Size);
-	printf("were written\n");
+	printf("All done, processed %lld bytes\n", target.Size);
 	exit(0);
 }
