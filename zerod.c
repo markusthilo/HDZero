@@ -5,7 +5,7 @@
 /* License: GPL-3 */
 
 /* Version */
-const char *VERSION = "1.2.0_20230606";
+const char *VERSION = "2.0.0_20230609";
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -49,9 +49,9 @@ void print_help() {
 	printf("    /f - Fill with binary ones / 0xFF instad of zeros\n");
 	printf("    /c - Check, do not wipe (zeros or 0xFF with /f)\n");
 	printf("    /p - Print size, do not wipe\n");
-	printf("    /v - Verbose infos/warnings\n\n");
+	printf("    /v - Verbose, print all warnings\n\n");
 	printf("Example:\n");
-	printf("zerod.exe \\\\.\\PHYSICALDRIVE1 /x /v\n\n");
+	printf("zerod.exe \\\\.\\PHYSICALDRIVE1\n\n");
 	printf("Disclaimer:\n");
 	printf("The author is not responsible for any loss of data.\n");
 	printf("Obviously, the tool is dangerous as its purpose is to erase data.\n\n");
@@ -66,8 +66,6 @@ typedef struct Z_TARGET {
     HANDLE Handle;	// handle for win api
 	LONGLONG Pointer;	// working here
 	LONGLONG Size;	// the full size to work
-	LONGLONG FivePercent;	// number of bytes that are 5% of size
-	int PercentPtr;	// percent that are processed
 	LONGLONG *BadBlocks;	// array for bad blocks
 	int BadBlockCnt;	// counter for bad blocks
 	int Type;	// disk: 1, file: 2, error: -1
@@ -173,32 +171,33 @@ void warning_not_wiped(Z_TARGET *target, Z_CONFIG *config, DWORD blocksize) {
 	set_pointer(target, target->Pointer + blocksize);
 }
 
-LONGLONG print_percent(Z_TARGET *target, LONGLONG next_print) {
-	target->PercentPtr += 5;
-	printf("... %d\%, %lld of %lld bytes\n",
-		target->PercentPtr, target->Pointer, target->Size);
+/* Print progress*/
+clock_t print_progress(Z_TARGET *target) {
+	double pnt = target->Pointer;
+	printf("\r...%*d%% of%*lld bytes >%*lld",
+		4, (int)(100*pnt/target->Size), 20, target->Size, 20, target->Pointer);
 	fflush(stdout);
-	return next_print + target->FivePercent;
+	return clock() + ONESEC;
 }
 
 /* Write bytes by given block size */
 void write_all_blocks(Z_TARGET *target, Z_CONFIG *config, DWORD blocksize) {
 	if ( target->Pointer >= target->Size ) return;
-	LONGLONG blocks_tw;
+	DWORD new;
 	if ( blocksize < MINBLOCKSIZE ) {
 		blocksize = target->Size - target->Pointer;
-		blocks_tw = 1;
-	} else {
-		blocks_tw = (target->Size - target->Pointer) / blocksize;
-		if ( blocks_tw < 1 ) return;
-	}
-	LONGLONG next_print = target->PercentPtr + target->FivePercent;
-	DWORD new;
-	for ( LONGLONG block_ptr=0; block_ptr<blocks_tw; block_ptr++ ) {
 		if ( !WriteFile(target->Handle, config->ByteBlock, blocksize, &new, NULL)
 			|| new < blocksize ) warning_unable_to_write(target, config, blocksize);
-		else target->Pointer += new;
-		if ( target->Pointer >= next_print ) next_print = print_percent(target, next_print);
+	} else {
+		LONGLONG blocks_tw = (target->Size - target->Pointer) / blocksize;
+		if ( blocks_tw < 1 ) return;
+		clock_t next_second = print_progress(target);
+		for ( LONGLONG block_ptr=0; block_ptr<blocks_tw; block_ptr++ ) {
+			if ( !WriteFile(target->Handle, config->ByteBlock, blocksize, &new, NULL)
+				|| new < blocksize ) warning_unable_to_write(target, config, blocksize);
+			else target->Pointer += new;
+			if ( clock() >= next_second ) next_second = print_progress(target);
+		}
 	}
 }
 
@@ -220,11 +219,11 @@ void selective_write_blocks(Z_TARGET *target, Z_CONFIG *config, DWORD blocksize)
 		}
 	} else {
 		ULONGLONG zeroff_ull;
-		LONGLONG next_print = target->PercentPtr + target->FivePercent;
 		LONGLONG blocks_trw = (target->Size - target->Pointer) / blocksize;
 		if ( blocks_trw < 1 ) return;
 		ULONGLONG *readblock = malloc(blocksize);
 		int ullperblock = blocksize >> 3;	// ull in one block = blocksize / 8
+		clock_t next_second = print_progress(target);
 		for ( LONGLONG block_ptr=0; block_ptr<blocks_trw; block_ptr++ ) {
 			if ( ReadFile(target->Handle, readblock, blocksize, &new, NULL)	// zeroed?
 				&& new == blocksize && matches_ulls(readblock, config->WipeULL, ullperblock)
@@ -235,7 +234,7 @@ void selective_write_blocks(Z_TARGET *target, Z_CONFIG *config, DWORD blocksize)
 					|| new < blocksize ) warning_unable_to_write(target, config, blocksize);
 				else target->Pointer += new;
 			}
-			if ( target->Pointer >= next_print ) next_print = print_percent(target, next_print);
+			if ( clock() >= next_second ) next_second = print_progress(target);
 		}
 	}
 }
@@ -248,21 +247,21 @@ void verify_blocks(Z_TARGET *target, Z_CONFIG *config, DWORD blocksize) {
 		blocksize = target->Size - target->Pointer;
 		BYTE *readblock = malloc(blocksize);
 		if ( ReadFile(target->Handle, readblock, blocksize, &new, NULL)	// zeroed?
-			&& new == blocksize && !matches_bytes(readblock, config->WipeByte, blocksize) )
+			&& new == blocksize && matches_bytes(readblock, config->WipeByte, blocksize) )
 			target->Pointer += new;
 		else warning_not_wiped(target, config, blocksize);
 	} else {
-		LONGLONG next_print = target->PercentPtr + target->FivePercent;
 		LONGLONG blocks_tr = (target->Size - target->Pointer) / blocksize;
 		if ( blocks_tr < 1 ) return;
 		ULONGLONG *readblock = malloc(blocksize);
 		int ullperblock = blocksize >> 3;	// ull in one block = blocksize / 8
+		clock_t next_second = print_progress(target);
 		for ( LONGLONG block_ptr=0; block_ptr<blocks_tr; block_ptr++ ) {
 			if ( ReadFile(target->Handle, readblock, blocksize, &new, NULL)	// zeroed?
 				&& new == blocksize && matches_ulls(readblock, config->WipeULL, ullperblock)
 			) target->Pointer += new;
 			else warning_not_wiped(target, config, blocksize);
-			if ( target->Pointer >= next_print ) next_print = print_percent(target, next_print);
+			if ( clock() >= next_second ) next_second = print_progress(target);
 		}
 	}
 }
@@ -474,8 +473,6 @@ int main(int argc, char **argv) {
 		fprintf(stderr, "Error: drives require block sizes n*512\n");
 		exit(1);
 	}
-	if ( target.Size > 100 ) target.FivePercent = target.Size / 20;
-	else target.FivePercent = target.Size+1;	// no percentage on mini sizes
 	target.BadBlocks = malloc(sizeof(LONGLONG)*MAXBADBLOCKS);
 	Z_CONFIG config;	// to pass configuration to the functions
 	config.ByteBlock = malloc(blocksize);	// build block to write
@@ -491,69 +488,64 @@ int main(int argc, char **argv) {
 	if ( write_all || xtrasave ) {	// write every block
 		if ( xtrasave ) {
 			for (int i=0; i<blocksize; i++) config.ByteBlock[i] = (char)rand();
-			printf("Pass 1 of 2, writing random bytes\n");
+			printf("Pass 1 of 2, writing random bytes using block size of %ld bytes\n", blocksize);
 			fflush(stdout);
 			set_pointer(&target, 0);
-			target.PercentPtr = 0;
 			target.BadBlockCnt = 0;
 			start = clock();	// 1st pass of 2
 			write_all_blocks(&target, &config, blocksize);
 			write_all_blocks(&target, &config, MINBLOCKSIZE);
 			write_all_blocks(&target, &config, 0);
 			duration = clock() - start;
-			printf("1st pass of 2 took %f second(s) / %ld clock units\n",
-				duration/CLOCKS_PER_SEC, duration);
+			printf("\n1st pass of 2 took %f second(s) / %ld clock units\n",
+				(float)duration/CLOCKS_PER_SEC, duration);
 			if ( target.BadBlockCnt > 0 ) warning_bad_blocks(&target);
 			printf("Pass 2 of 2, w");
 		}
 			else printf("W");
-		printf("riting 0x%02X\n", config.WipeByte);
+		printf("riting 0x%02X using block size of %ld bytes\n", config.WipeByte, blocksize);
 		fflush(stdout);
 		memset(config.ByteBlock, config.WipeByte, blocksize);
 		set_pointer(&target, 0);
-		target.PercentPtr = 0;
 		target.BadBlockCnt = 0;
 		start = clock();
 		write_all_blocks(&target, &config, blocksize);
 		write_all_blocks(&target, &config, MINBLOCKSIZE);
 		write_all_blocks(&target, &config, 0);
 		duration = clock() - start;
-		if ( xtrasave ) printf("2nd pass");
-		else printf("Wiping");
-		printf(" took %f second(s) / %ld clock units\n", duration/CLOCKS_PER_SEC, duration);
+		if ( xtrasave ) printf("\n2nd pass");
+		else printf("\nWiping");
+		printf(" took %f second(s) / %ld clock units\n", (float)duration/CLOCKS_PER_SEC, duration);
 		if ( target.BadBlockCnt > 0 ) warning_bad_blocks(&target);
 	} else if ( !pure_check ) {	// overwrite only blocks that are not zeroed
-		printf("Looking for unwiped blocks and overwriting with 0x%02X\n", config.WipeByte);
+		printf("Looking for unwiped blocks and overwriting with 0x%02X using block size of %ld bytes\n",
+			config.WipeByte, blocksize);
 		memset(config.ByteBlock, config.WipeByte, blocksize);
 		set_pointer(&target, 0);
-		target.PercentPtr = 0;
 		target.BadBlockCnt = 0;
 		start = clock();
 		selective_write_blocks(&target, &config, blocksize);
 		selective_write_blocks(&target, &config, MINBLOCKSIZE);
 		selective_write_blocks(&target, &config, 0);
 		duration = clock() - start;
-		printf("Verifying and wiping took %f second(s) / %ld clock units\n",
-			duration/CLOCKS_PER_SEC, duration);
+		printf("\nVerifying and wiping took %f second(s) / %ld clock units\n",
+			(float)duration/CLOCKS_PER_SEC, duration);
 		if ( target.BadBlockCnt > 0 ) warning_bad_blocks(&target);
 	}
-	free(config.ByteBlock);
-	if ( pure_check || write_all || xtrasave ) {	// full verify checks every byte
-		printf("Verifying %s\n", target.Path);
-		fflush(stdout);
-		set_pointer(&target, 0);
-		target.PercentPtr = 0;
-		target.BadBlockCnt = 0;
-		start = clock();
-		verify_blocks(&target, &config, blocksize);
-		verify_blocks(&target, &config, MINBLOCKSIZE);
-		verify_blocks(&target, &config, 0);
-		duration = clock() - start;
-		printf("Verifying took %f second(s) / %ld clock units\n",
-			duration/CLOCKS_PER_SEC, duration);
-		if ( target.BadBlockCnt > 0 ) warning_bad_blocks(&target);
-	}
-	printf("Sample:\n");
+	free(config.ByteBlock);	// full verify checks every byte
+	printf("Verifying %s using block size of %ld bytes\n", target.Path, blocksize);
+	fflush(stdout);
+	set_pointer(&target, 0);
+	target.BadBlockCnt = 0;
+	start = clock();
+	verify_blocks(&target, &config, blocksize);
+	verify_blocks(&target, &config, MINBLOCKSIZE);
+	verify_blocks(&target, &config, 0);
+	duration = clock() - start;
+	printf("\nVerifying took %f second(s) / %ld clock units\n",
+		(float)duration/CLOCKS_PER_SEC, duration);
+	if ( target.BadBlockCnt > 0 ) warning_bad_blocks(&target);
+	printf("Sample:\n");	// Read sample block(s) to show result
 	set_pointer(&target, 0);	// print first block
 	print_block(&target, &config);
 	LONGLONG halfblocks = target.Size / ( MINBLOCKSIZE << 1 );	// block in the middle?
