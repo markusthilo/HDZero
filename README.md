@@ -1,4 +1,5 @@
-#HDZero
+# HDZero
+### --- Deprecated project - transitioned into FallbackImager, module: HdZero (hdzero.py, zerod.c) ---
 ## Application with a simple GUI to securely erase disks
 In 1-pass mode, zeros are written to an entire disk (also partition table, slacks, etc.). The 2-pass option adds a first pass, writing a random block over the existing data (for the paranoid...). A verify option allows you to verify that each byte is zero after erasing. A new partition table and a new primary partition can be created automatically. It is also possible to have HDZero write a log to the new partition. This feature is aimed at professional environments where data protection requirements must be met.
 
